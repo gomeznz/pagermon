@@ -39,6 +39,7 @@ class Result:
     suppressed: bool = False
     colour: str = ""
     keywords: list[str] = field(default_factory=list)
+    keyword_ids: list[int] = field(default_factory=list)
     spans: list[tuple[int, int, str]] = field(default_factory=list)  # start, end, colour
 
 
@@ -69,6 +70,7 @@ def evaluate(message: str, rules: list[Rule], cap_alert: bool = False,
             if not hits:
                 continue
             res.keywords.append(rule.keyword)
+            res.keyword_ids.append(rule.id)
             kw_alert |= rule.alert
             kw_suppress |= rule.suppress
             if rule.colour and not kw_colour:
@@ -105,3 +107,51 @@ def segments(message: str, spans) -> list[tuple[str, bool, str]]:
     if pos < len(message):
         out.append((message[pos:], False, ""))
     return out
+
+
+# --- kiosk routing -----------------------------------------------------------
+#
+# Capcode and keyword rules can carry per-kiosk actions, stored in kiosk_routes
+# as (rule_type, rule_id, kiosk_id, action) with kiosk_id 0 meaning "all kiosks".
+#
+# For one page on one kiosk:
+#   * actions naming that kiosk beat "all kiosks" actions
+#   * then:  alert  > suppress > forward
+#       alert    — show it, styled as an alert
+#       suppress — never show it on this kiosk
+#       forward  — show it even if the kiosk's capcode filter, its
+#                  "only forwarded pages" mode or global suppression would hide it
+#   * with no kiosk action, the kiosk follows its normal settings: show the page
+#     if it is in the kiosk's capcode filter, not suppressed, and the kiosk shows
+#     all pages; alert styling follows the page's own alert.
+
+KIOSK_ACTIONS = ("forward", "alert", "suppress")
+RULE_TYPES = ("capcode", "keyword")
+
+
+def load_routes(conn: sqlite3.Connection) -> dict[tuple[str, int], list[tuple[int, str]]]:
+    routes: dict[tuple[str, int], list[tuple[int, str]]] = {}
+    for r in conn.execute("SELECT rule_type, rule_id, kiosk_id, action FROM kiosk_routes"):
+        routes.setdefault((r["rule_type"], r["rule_id"]), []).append((r["kiosk_id"], r["action"]))
+    return routes
+
+
+def kiosk_decision(kiosk_id: int, routes: dict, alias_id, keyword_ids, *, in_filter: bool,
+                   forwarded_only: bool, suppressed: bool, alert: bool) -> tuple[bool, bool]:
+    """Return (show, alert) for one page on one kiosk."""
+    keys = ([("capcode", alias_id)] if alias_id else []) + [("keyword", k) for k in keyword_ids]
+    specific, everywhere = set(), set()
+    for key in keys:
+        for kid, action in routes.get(key, ()):
+            if kid == kiosk_id:
+                specific.add(action)
+            elif kid == 0:
+                everywhere.add(action)
+    actions = specific or everywhere
+    if "alert" in actions:
+        return True, True
+    if "suppress" in actions:
+        return False, False
+    if "forward" in actions:
+        return True, alert
+    return (in_filter and not suppressed and not forwarded_only), alert

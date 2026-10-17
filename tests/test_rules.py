@@ -45,3 +45,24 @@ def test_regex_characters_are_literal():
     r = [rule(1, "a.b*", match="contains")]
     assert evaluate("xa.b*y", r).keywords == ["a.b*"]
     assert evaluate("aXbbb", r).keywords == []
+
+
+from app.rules import kiosk_decision
+
+
+def test_kiosk_routing_precedence():
+    # capcode alias 5 forwards to all kiosks; keyword 9 suppresses on kiosk 2; keyword 7 alerts on kiosk 3
+    routes = {("capcode", 5): [(0, "forward")], ("keyword", 9): [(2, "suppress")],
+              ("keyword", 7): [(3, "alert")]}
+    base = dict(in_filter=False, forwarded_only=True, suppressed=True, alert=False)
+    # forward to all overrides filter, forwarded-only mode and suppression
+    assert kiosk_decision(1, routes, 5, [], **base) == (True, False)
+    # a named-kiosk setting beats "all kiosks"
+    assert kiosk_decision(2, routes, 5, [9], **base) == (False, False)
+    # alert beats suppress and forward, and shows as an alert
+    assert kiosk_decision(3, routes, 5, [7, 9], **base) == (True, True)
+    # no routes: normal kiosk behaviour
+    plain = dict(in_filter=True, forwarded_only=False, suppressed=False, alert=True)
+    assert kiosk_decision(1, {}, None, [], **plain) == (True, True)
+    assert kiosk_decision(1, {}, None, [], **{**plain, "forwarded_only": True}) == (False, True)
+    assert kiosk_decision(1, {}, None, [], **{**plain, "suppressed": True}) == (False, True)

@@ -104,6 +104,19 @@ def parse_capcode_filter(text: str) -> list[tuple[int, int]] | None:
     return ranges
 
 
+def capcode_matches(ranges: list[tuple[int, int]] | None, capcode: str) -> bool:
+    """Python twin of capcode_sql: does a capcode fall inside a parsed filter?"""
+    if ranges is None:
+        return False
+    if not ranges:
+        return True
+    try:
+        n = int(capcode)
+    except ValueError:
+        return False
+    return any(lo <= n <= hi for lo, hi in ranges)
+
+
 def capcode_sql(text: str, column: str = "m.capcode") -> tuple[str, list]:
     """SQL condition limiting messages.capcode to a user's filter."""
     ranges = parse_capcode_filter(text or "")

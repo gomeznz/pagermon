@@ -157,7 +157,7 @@ def message_query(user: dict, f: dict) -> tuple[str, list]:
 
 
 MSG_SELECT = (
-    "SELECT m.*, a.label AS alias, COALESCE(a.alert, 0) AS cap_alert, "
+    "SELECT m.*, a.id AS alias_id, a.label AS alias, COALESCE(a.alert, 0) AS cap_alert, "
     "COALESCE(a.suppress, 0) AS cap_suppress, COALESCE(a.colour, '') AS cap_colour "
     "FROM messages m LEFT JOIN aliases a ON a.capcode = m.capcode "
 )
@@ -174,6 +174,7 @@ def msg_dict(row, rules: list) -> dict:
     d["suppressed"] = int(res.suppressed)
     d["colour"] = res.colour
     d["keywords"] = res.keywords
+    d["keyword_ids"] = res.keyword_ids
     d["spans"] = [list(s) for s in res.spans]
     return d
 
@@ -545,7 +546,7 @@ def create_app() -> FastAPI:
     @app.post("/config/kiosk")
     async def create_kiosk(request: Request, csrf: str = Form(""), name: str = Form(""),
                            capcode_filter: str = Form(""), theme: str = Form("dark"),
-                           hide_tone: str = Form("")):
+                           hide_tone: str = Form(""), mode: str = Form("all")):
         check_csrf(request, csrf)
         conn, user = require_user(request, admin=True)
         try:
@@ -559,12 +560,34 @@ def create_app() -> FastAPI:
             theme = theme if theme in ("dark", "light", "auto") else "dark"
             with db.transaction(conn):
                 conn.execute(
-                    "INSERT INTO kiosks (name, token, capcode_filter, theme, hide_tone, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO kiosks (name, token, capcode_filter, theme, hide_tone, mode, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (name, secrets.token_urlsafe(24), capcode_filter.strip(), theme,
-                     1 if hide_tone else 0, time.time()))
+                     1 if hide_tone else 0, mode if mode in ("all", "forwarded") else "all", time.time()))
                 db.audit(conn, user["username"], "kiosk_create", name)
             flash(request, f"Kiosk \u201c{name}\u201d created. Open its link on the display.")
+            return back("/config#kiosks")
+        finally:
+            conn.close()
+
+    @app.post("/config/kiosk/{kid}/edit")
+    async def edit_kiosk(request: Request, kid: int, csrf: str = Form(""), name: str = Form(""),
+                         capcode_filter: str = Form(""), theme: str = Form("dark"),
+                         hide_tone: str = Form(""), mode: str = Form("all")):
+        check_csrf(request, csrf)
+        conn, user = require_user(request, admin=True)
+        try:
+            name = " ".join(name.split())[:40]
+            if not name or auth.parse_capcode_filter(capcode_filter) is None:
+                flash(request, "A kiosk needs a name, and the capcode filter must be capcodes or ranges.", "error")
+                return back("/config#kiosks")
+            theme = theme if theme in ("dark", "light", "auto") else "dark"
+            mode = mode if mode in ("all", "forwarded") else "all"
+            with db.transaction(conn):
+                conn.execute("UPDATE kiosks SET name=?, capcode_filter=?, theme=?, hide_tone=?, mode=? "
+                             "WHERE id=?", (name, capcode_filter.strip(), theme, 1 if hide_tone else 0, mode, kid))
+                db.audit(conn, user["username"], "kiosk_edit", f"{name} mode={mode} theme={theme}")
+            flash(request, f"Saved kiosk \u201c{name}\u201d. Open screens pick up the change within ten seconds; a new theme shows after the screen reloads.")
             return back("/config#kiosks")
         finally:
             conn.close()
@@ -586,6 +609,7 @@ def create_app() -> FastAPI:
                     msg = f"New link for \u201c{row['name']}\u201d. The old link has stopped working."
                 else:
                     conn.execute("DELETE FROM kiosks WHERE id = ?", (kid,))
+                    conn.execute("DELETE FROM kiosk_routes WHERE kiosk_id = ?", (kid,))
                     msg = f"Kiosk \u201c{row['name']}\u201d removed."
                 db.audit(conn, user["username"], f"kiosk_{action}", row["name"])
             flash(request, msg)
@@ -622,20 +646,35 @@ def create_app() -> FastAPI:
             await websocket.close(code=1008)
             return
         await websocket.accept()
-        where, args = auth.capcode_sql(k["capcode_filter"])
-        hide_tone = bool(k["hide_tone"])
+        kiosk_id = k["id"]
+        state = {"k": k, "routes": kwrules.load_routes(conn)}
 
         def still_allowed():
-            # Disabling the kiosk, a new link or removing it cuts off open screens.
-            ok = _kiosk(conn, token) is not None
-            if ok:
-                conn.execute("UPDATE kiosks SET last_seen = ? WHERE token = ?", (time.time(), token))
-            return ok
+            # Disabling the kiosk, a new link or removing it cuts off open screens;
+            # otherwise pick up edits to the kiosk and to kiosk routing.
+            row = _kiosk(conn, token)
+            if row is None:
+                return False
+            conn.execute("UPDATE kiosks SET last_seen = ? WHERE id = ?", (time.time(), kiosk_id))
+            state["k"] = row
+            state["routes"] = kwrules.load_routes(conn)
+            return True
 
         def keep(m):
-            return not m["suppressed"] and not (hide_tone and m["msg_type"] == "tone")
+            kk = state["k"]
+            if kk["hide_tone"] and m["msg_type"] == "tone":
+                return False
+            show, alert = kwrules.kiosk_decision(
+                kiosk_id, state["routes"], m.get("alias_id"), m.get("keyword_ids", []),
+                in_filter=auth.capcode_matches(auth.parse_capcode_filter(kk["capcode_filter"]), m["capcode"]),
+                forwarded_only=kk["mode"] == "forwarded",
+                suppressed=bool(m["suppressed"]), alert=bool(m["alert"]))
+            m["alert"] = int(alert)
+            return show
 
-        await _feed(websocket, conn, where, args, still_allowed, keep=keep, backlog=60)
+        # Forwarded pages can come from outside the kiosk's capcode filter, so the
+        # feed reads every page and keep() decides what this kiosk shows.
+        await _feed(websocket, conn, "1=1", [], still_allowed, keep=keep, backlog=200)
 
     # --- debug console (admin) -------------------------------------------
 
@@ -707,8 +746,14 @@ def create_app() -> FastAPI:
                 prefill = str(int(edit))
             keywords = conn.execute("SELECT * FROM keywords ORDER BY keyword COLLATE NOCASE").fetchall()
             k = conn.execute("SELECT * FROM keywords WHERE id = ?", (kw,)).fetchone() if kw else None
+            kiosks = conn.execute("SELECT id, name, active FROM kiosks ORDER BY name COLLATE NOCASE").fetchall()
+            routes = _route_summary(conn)
+            e_routes = {r["kiosk_id"]: r["action"] for r in routes.get(("capcode", e["id"]), [])} if e else {}
+            k_routes = {r["kiosk_id"]: r["action"] for r in routes.get(("keyword", k["id"]), [])} if k else {}
             return render(request, "capcodes.html", user, aliases=aliases, e=e,
                           prefill=prefill, colours=COLOURS, keywords=keywords, k=k,
+                          kiosks=kiosks, routes=routes, e_routes=e_routes, k_routes=k_routes,
+                          kiosk_opts=[(0, "All kiosks")] + [(r["id"], r["name"]) for r in kiosks],
                           page_name="capcodes")
         finally:
             conn.close()
@@ -726,8 +771,9 @@ def create_app() -> FastAPI:
                 flash(request, "Enter a numeric capcode.", "error")
                 return back("/capcodes")
             colour = colour if colour in COLOURS else ""
-            if not label and not suppress and not colour:
-                flash(request, "Give the capcode a label or colour, or tick Suppress.", "error")
+            has_routes = any(k.startswith("kiosk_") and v for k, v in (await request.form()).multi_items())
+            if not label and not suppress and not colour and not has_routes:
+                flash(request, "Give the capcode a label, colour, kiosk setting, or tick Suppress.", "error")
                 return back("/capcodes")
             capcode = str(int(capcode))
             sup = 1 if suppress else 0
@@ -743,6 +789,11 @@ def create_app() -> FastAPI:
                          f"{capcode} = {label or '(no label)'}"
                          f"{' alert' if al else ''}{' suppressed' if sup else ''}"
                          f"{' colour=' + colour if colour else ''}")
+            aid = conn.execute("SELECT id FROM aliases WHERE capcode = ?", (capcode,)).fetchone()["id"]
+            with db.transaction(conn):
+                routes = await _save_routes(request, conn, "capcode", aid)
+                if routes:
+                    db.audit(conn, user["username"], "kiosk_routes", f"capcode {capcode}: {', '.join(routes)}")
             flash(request, f"Saved {capcode}." + (" Its pages are now hidden on the Live screen." if sup else ""))
             return back("/capcodes")
         finally:
@@ -764,8 +815,9 @@ def create_app() -> FastAPI:
             colour = colour if colour in COLOURS else ""
             al = 1 if alert else 0
             sup = 0 if al else (1 if suppress else 0)  # an alerting keyword is never hidden
-            if not (al or sup or colour):
-                flash(request, "Choose at least one of Alert, Suppress or a colour for the keyword.", "error")
+            has_routes = any(k.startswith("kiosk_") and v for k, v in (await request.form()).multi_items())
+            if not (al or sup or colour or has_routes):
+                flash(request, "Choose at least one of Alert, Suppress, a colour or a kiosk setting for the keyword.", "error")
                 return back(f"/capcodes?kw={id}#keywords" if id else "/capcodes#keywords")
             clash = conn.execute("SELECT id FROM keywords WHERE keyword = ? AND id != ?",
                                  (keyword, id)).fetchone()
@@ -776,13 +828,16 @@ def create_app() -> FastAPI:
                 if id:
                     conn.execute("UPDATE keywords SET keyword=?, match=?, alert=?, suppress=?, colour=? "
                                  "WHERE id=?", (keyword, match, al, sup, colour, id))
+                    rule_id = id
                 else:
-                    conn.execute("INSERT INTO keywords (keyword, match, alert, suppress, colour) "
-                                 "VALUES (?, ?, ?, ?, ?)", (keyword, match, al, sup, colour))
+                    rule_id = conn.execute("INSERT INTO keywords (keyword, match, alert, suppress, colour) "
+                                           "VALUES (?, ?, ?, ?, ?)", (keyword, match, al, sup, colour)).lastrowid
+                routes = await _save_routes(request, conn, "keyword", rule_id)
                 db.bump_config_version(conn)
                 db.audit(conn, user["username"], "keyword_save",
                          f"{keyword} ({match}){' alert' if al else ''}{' suppressed' if sup else ''}"
-                         f"{' colour=' + colour if colour else ''}")
+                         f"{' colour=' + colour if colour else ''}"
+                         f"{' kiosks: ' + ', '.join(routes) if routes else ''}")
             flash(request, f"Saved keyword \u201c{keyword}\u201d.")
             return back("/capcodes#keywords")
         finally:
@@ -815,6 +870,7 @@ def create_app() -> FastAPI:
             if row:
                 with db.transaction(conn):
                     conn.execute("DELETE FROM keywords WHERE id = ?", (kid,))
+                    conn.execute("DELETE FROM kiosk_routes WHERE rule_type = 'keyword' AND rule_id = ?", (kid,))
                     db.bump_config_version(conn)
                     db.audit(conn, user["username"], "keyword_delete", row["keyword"])
             return back("/capcodes#keywords")
@@ -850,6 +906,7 @@ def create_app() -> FastAPI:
             if row:
                 with db.transaction(conn):
                     conn.execute("DELETE FROM aliases WHERE id = ?", (aid,))
+                    conn.execute("DELETE FROM kiosk_routes WHERE rule_type = 'capcode' AND rule_id = ?", (aid,))
                     db.bump_config_version(conn)
                     db.audit(conn, user["username"], "alias_delete", row["capcode"])
             return back("/capcodes")
@@ -1058,6 +1115,38 @@ def _csv_safe(value: str) -> str:
         return "'" + value
     return value
 
+
+
+async def _save_routes(request: Request, conn, rule_type: str, rule_id: int) -> list[str]:
+    """Replace a rule's per-kiosk actions from form fields kiosk_<id> (0 = all kiosks)."""
+    form = await request.form()
+    valid = {0} | {r["id"] for r in conn.execute("SELECT id FROM kiosks")}
+    conn.execute("DELETE FROM kiosk_routes WHERE rule_type = ? AND rule_id = ?", (rule_type, rule_id))
+    summary = []
+    for key, action in form.multi_items():
+        if not key.startswith("kiosk_") or action not in kwrules.KIOSK_ACTIONS:
+            continue
+        try:
+            kid = int(key[6:])
+        except ValueError:
+            continue
+        if kid in valid:
+            conn.execute("INSERT OR REPLACE INTO kiosk_routes (rule_type, rule_id, kiosk_id, action) "
+                         "VALUES (?, ?, ?, ?)", (rule_type, rule_id, kid, action))
+            summary.append(f"{action}@{'all' if kid == 0 else kid}")
+    return summary
+
+
+def _route_summary(conn) -> dict[tuple[str, int], list[dict]]:
+    """Per-rule list of kiosk actions for showing in the Capcodes tables."""
+    names = {r["id"]: r["name"] for r in conn.execute("SELECT id, name FROM kiosks")}
+    out: dict[tuple[str, int], list[dict]] = {}
+    for r in conn.execute("SELECT * FROM kiosk_routes ORDER BY kiosk_id"):
+        name = "All kiosks" if r["kiosk_id"] == 0 else names.get(r["kiosk_id"])
+        if name:
+            out.setdefault((r["rule_type"], r["rule_id"]), []).append(
+                {"kiosk": name, "action": r["action"], "kiosk_id": r["kiosk_id"]})
+    return out
 
 
 def _same_origin(websocket: WebSocket) -> bool:

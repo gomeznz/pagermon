@@ -78,7 +78,7 @@
 
 <section class="card" id="kiosks">
   <h2>Kiosk displays</h2>
-  <p class="muted">A kiosk is a full-screen, read-only Live view for a wall screen or spare monitor. It opens from its own link <strong>without signing in</strong>, so treat the link like a password: anyone who has it can watch pages. Suppressed pages are never shown on a kiosk. Disabling a kiosk, giving it a new link or removing it cuts off any screen showing it within ten seconds.</p>
+  <p class="muted">A kiosk is a full-screen, read-only Live view for a wall screen or spare monitor. It opens from its own link <strong>without signing in</strong>, so treat the link like a password: anyone who has it can watch pages. Suppressed pages aren't shown on a kiosk unless a capcode or keyword rule forwards them to it. Disabling a kiosk, giving it a new link or removing it cuts off any screen showing it within ten seconds.</p>
   {% if kiosks %}
   <div class="kiosk-list">
     {% for kk in kiosks %}
@@ -86,7 +86,7 @@
       <div class="kiosk-head">
         <strong>{{ kk.name }}</strong>
         {% if kk.active %}<span class="tag ok">enabled</span>{% else %}<span class="tag">disabled</span>{% endif %}
-        <span class="small muted">{{ kk.theme }} theme{% if kk.hide_tone %} · tone-only hidden{% endif %} · capcodes: {{ kk.capcode_filter or 'all' }} · last viewed {{ kk.last_seen|ts if kk.last_seen else 'never' }}</span>
+        <span class="small muted">{{ 'only forwarded pages' if kk.mode == 'forwarded' else 'all pages' }} · {{ kk.theme }} theme{% if kk.hide_tone %} · tone-only hidden{% endif %} · capcodes: {{ kk.capcode_filter or 'all' }} · last viewed {{ kk.last_seen|ts if kk.last_seen else 'never' }}</span>
       </div>
       <div class="kiosk-link">
         <input class="mono" readonly value="{{ base_url }}/kiosk/{{ kk.token }}" aria-label="Kiosk link for {{ kk.name }}">
@@ -98,6 +98,27 @@
         <form method="post" action="/config/kiosk/{{ kk.id }}/newlink" class="confirm" data-confirm="Make a new link for {{ kk.name }}? The current link will stop working."><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">New link</button></form>
         <form method="post" action="/config/kiosk/{{ kk.id }}/delete" class="confirm" data-confirm="Remove kiosk {{ kk.name }}?"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Remove</button></form>
       </div>
+      <details class="kiosk-edit">
+        <summary>Settings</summary>
+        <form method="post" action="/config/kiosk/{{ kk.id }}/edit" class="grid">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <label>Name <input name="name" required maxlength="40" value="{{ kk.name }}"></label>
+          <label>Show
+            <select name="mode">
+              <option value="all" {% if kk.mode != 'forwarded' %}selected{% endif %}>All pages (within the capcode filter)</option>
+              <option value="forwarded" {% if kk.mode == 'forwarded' %}selected{% endif %}>Only pages forwarded to it</option>
+            </select>
+          </label>
+          <label>Capcode filter <input name="capcode_filter" value="{{ kk.capcode_filter }}" placeholder="all"></label>
+          <label>Theme
+            <select name="theme">
+              {% for t, tl in [('dark', 'Dark'), ('light', 'Light'), ('auto', "Follow the screen's setting")] %}<option value="{{ t }}" {% if kk.theme == t %}selected{% endif %}>{{ tl }}</option>{% endfor %}
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" name="hide_tone" value="1" {% if kk.hide_tone %}checked{% endif %}> Hide tone-only pages</label>
+          <div class="span2 form-actions"><button class="primary">Save kiosk</button></div>
+        </form>
+      </details>
     </div>
     {% endfor %}
   </div>
@@ -106,6 +127,13 @@
   <form method="post" action="/config/kiosk" class="grid">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label>Name <input name="name" required maxlength="40" placeholder="Workshop screen"></label>
+    <label>Show
+      <select name="mode">
+        <option value="all">All pages (within the capcode filter)</option>
+        <option value="forwarded">Only pages forwarded to it</option>
+      </select>
+      <small>Forward pages to a kiosk from capcode and keyword rules on the Capcodes page.</small>
+    </label>
     <label>Capcode filter <input name="capcode_filter" placeholder="all"><small>Optional, e.g. 1234567, 2000000-2000099.</small></label>
     <label>Theme
       <select name="theme"><option value="dark">Dark</option><option value="light">Light</option><option value="auto">Follow the screen's setting</option></select>

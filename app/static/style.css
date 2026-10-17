@@ -366,3 +366,28 @@ form.inline select { flex: 0 0 auto; }
 .kiosk-link input { flex: 1; min-width: 0; font-size: 0.85rem; }
 .kiosk-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 .kiosk-actions form { margin: 0; }
+
+/* Kiosk routing on capcode/keyword forms */
+.kiosk-routes { flex-basis: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.8rem; margin: 0.25rem 0; display: block; }
+.kiosk-routes legend { font-size: 0.88rem; font-weight: 550; padding: 0 0.3rem; }
+.kr-grid { display: grid; gap: 0; margin-bottom: 0.4rem; max-width: 40rem; }
+.kr-row { display: grid; grid-template-columns: minmax(8rem, 1fr) repeat(4, 5rem); align-items: center; border-bottom: 1px solid var(--line); padding: 0.25rem 0; }
+.kr-row:last-child { border-bottom: 0; }
+.kr-headrow { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.kr-headrow span:not(:first-child), .kr-opt { text-align: center; justify-content: center; }
+.kr-all .kr-name { font-weight: 600; }
+.kr-opt { flex-direction: row; display: flex; cursor: pointer; padding: 0.2rem 0; }
+.kr-opt input { width: 1.05rem; height: 1.05rem; accent-color: var(--accent); min-height: 0; }
+.route-chip { display: inline-block; font-size: 0.75rem; border-radius: 99px; padding: 0.05rem 0.5rem; margin: 0.1rem 0.2rem 0.1rem 0;
+  border: 1px solid var(--line); white-space: nowrap; }
+.route-chip.r-forward { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.route-chip.r-alert { background: var(--bad-soft); color: var(--bad); border-color: transparent; font-weight: 600; }
+.route-chip.r-suppress { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.routes-cell { max-width: 16rem; }
+.kiosk-edit summary { cursor: pointer; color: var(--muted); font-size: 0.88rem; }
+.kiosk-edit form { margin-top: 0.6rem; }
+@media (max-width: 680px) {
+  .kr-row { grid-template-columns: minmax(6rem, 1fr) repeat(4, 3rem); }
+  .kr-headrow { font-size: 0.6rem; }
+  .capcode-table td.routes-cell { width: 100%; max-width: none; }
+}

@@ -89,7 +89,15 @@ Then in the env file set `PAGER_BIND=127.0.0.1`, `PAGER_SECURE_COOKIES=true` and
 
 ## Kiosk displays
 
-Create a kiosk under **Config → Kiosk displays**, then open its link on the screen. The link works without signing in, so treat it like a password, and use **New link** if it ever leaks. Suppressed pages never appear on a kiosk.
+Create a kiosk under **Config → Kiosk displays**, then open its link on the screen. The link works without signing in, so treat it like a password, and use **New link** if it ever leaks. Each kiosk can show **all pages** (within its capcode filter) or **only pages forwarded to it**.
+
+Every capcode and keyword rule has a **Kiosks** grid on the Capcodes page. For *All kiosks* and for each named kiosk you can pick:
+
+- **Forward** — show the page there even if that kiosk wouldn't normally show it (outside its filter, forwarded-only mode, or suppressed).
+- **Alert** — forward it and show it as an alert on that kiosk.
+- **Suppress** — never show it on that kiosk.
+
+For a given kiosk, a setting for that named kiosk beats an *All kiosks* setting, and Alert beats Suppress, which beats Forward. Kiosk alerts are display-only; webhooks still follow the rule's own Alert tick-box. Routing changes reach open screens within about ten seconds.
 
 To turn a spare Raspberry Pi with a monitor into a dedicated display, install Raspberry Pi OS **with desktop**, then add this to autostart (`~/.config/labwc/autostart` on current Pi OS):
 

@@ -87,9 +87,19 @@ CREATE TABLE IF NOT EXISTS kiosks (
     capcode_filter TEXT NOT NULL DEFAULT '',
     theme          TEXT NOT NULL DEFAULT 'dark' CHECK (theme IN ('dark', 'light', 'auto')),
     hide_tone      INTEGER NOT NULL DEFAULT 0,
+    mode           TEXT NOT NULL DEFAULT 'all' CHECK (mode IN ('all', 'forwarded')),
     active         INTEGER NOT NULL DEFAULT 1,
     created_at     REAL NOT NULL,
     last_seen      REAL
+);
+
+CREATE TABLE IF NOT EXISTS kiosk_routes (
+    id        INTEGER PRIMARY KEY,
+    rule_type TEXT NOT NULL CHECK (rule_type IN ('capcode', 'keyword')),
+    rule_id   INTEGER NOT NULL,
+    kiosk_id  INTEGER NOT NULL,   -- 0 = all kiosks
+    action    TEXT NOT NULL CHECK (action IN ('forward', 'alert', 'suppress')),
+    UNIQUE (rule_type, rule_id, kiosk_id)
 );
 
 CREATE TABLE IF NOT EXISTS keywords (
@@ -178,6 +188,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(aliases)")}
     if "suppress" not in cols:
         conn.execute("ALTER TABLE aliases ADD COLUMN suppress INTEGER NOT NULL DEFAULT 0")
+    kcols = {r["name"] for r in conn.execute("PRAGMA table_info(kiosks)")}
+    if kcols and "mode" not in kcols:
+        conn.execute("ALTER TABLE kiosks ADD COLUMN mode TEXT NOT NULL DEFAULT 'all'")
     if "colour" not in cols:
         conn.execute("ALTER TABLE aliases ADD COLUMN colour TEXT NOT NULL DEFAULT ''")
 

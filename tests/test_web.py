@@ -354,3 +354,52 @@ def test_kiosk(app):
     login(v, "viewer1", "a brand new password")
     assert v.post("/config/kiosk", data={"csrf": "x", "name": "nope"}).status_code == 403
     conn.close()
+
+
+def test_kiosk_routing(app):
+    conn = db.connect()
+    for tbl in ("kiosks", "kiosk_routes", "keywords"):
+        conn.execute(f"DELETE FROM {tbl}")
+    now = time.time()
+    for cap, msg in (("3001", "routine check"), ("3002", "FIRE at depot"), ("3003", "noise")):
+        conn.execute("INSERT INTO messages (ts, channel_name, protocol, capcode, msg_type, message) "
+                     "VALUES (?, 'Test', 'POCSAG1200', ?, 'alpha', ?)", (now, cap, msg))
+    c = TestClient(app)
+    login(c, "alex")
+    token = csrf_of(c.get("/config").text)
+    c.post("/config/kiosk", data={"csrf": token, "name": "Board", "mode": "forwarded"})
+    c.post("/config/kiosk", data={"csrf": token, "name": "Wall", "capcode_filter": "3001-3003"})
+    board = conn.execute("SELECT * FROM kiosks WHERE name='Board'").fetchone()
+    wall = conn.execute("SELECT * FROM kiosks WHERE name='Wall'").fetchone()
+    assert board["mode"] == "forwarded"
+    page = c.get("/capcodes")
+    assert 'name="kiosk_0"' in page.text and f'name="kiosk_{board["id"]}"' in page.text
+    # capcode 3001: forward to Board only. Keyword "fire": alert on all kiosks.
+    # Capcode 3003: suppress on Wall only (label-less, kiosk-only rule is allowed).
+    c.post("/config/alias", data={"csrf": token, "capcode": "3001", "label": "Routine",
+                                  f"kiosk_{board['id']}": "forward"})
+    c.post("/config/keyword", data={"csrf": token, "keyword": "fire", "kiosk_0": "alert"})
+    c.post("/config/alias", data={"csrf": token, "capcode": "3003", "label": "",
+                                  f"kiosk_{wall['id']}": "suppress"})
+    assert conn.execute("SELECT COUNT(*) FROM kiosk_routes").fetchone()[0] == 3
+    page = c.get("/capcodes").text
+    assert "route-chip r-forward" in page and "All kiosks" in page
+
+    anon = TestClient(app)
+    def shown(k):
+        with anon.websocket_connect(f"/kiosk/{k['token']}/ws", headers={"origin": "http://testserver"}) as ws:
+            return {m["capcode"]: m["alert"] for m in ws.receive_json()["messages"]
+                    if m["capcode"] in ("3001", "3002", "3003")}
+    assert shown(board) == {"3001": 0, "3002": 1}          # only forwarded + alerted
+    assert shown(wall) == {"3001": 0, "3002": 1}           # 3003 suppressed on Wall only
+    # editing the capcode clears its old routes
+    c.post("/config/alias", data={"csrf": token, "capcode": "3001", "label": "Routine"})
+    assert shown(board) == {"3002": 1}
+    # removing a kiosk removes its routes
+    c.post(f"/config/kiosk/{wall['id']}/delete", data={"csrf": token})
+    assert conn.execute("SELECT COUNT(*) FROM kiosk_routes WHERE kiosk_id=?", (wall["id"],)).fetchone()[0] == 0
+    # kiosk settings can be edited
+    c.post(f"/config/kiosk/{board['id']}/edit", data={"csrf": token, "name": "Board 2", "mode": "all", "theme": "light"})
+    b2 = conn.execute("SELECT * FROM kiosks WHERE id=?", (board["id"],)).fetchone()
+    assert (b2["name"], b2["mode"], b2["theme"]) == ("Board 2", "all", "light")
+    conn.close()
