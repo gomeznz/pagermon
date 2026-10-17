@@ -1,0 +1,29 @@
+[Unit]
+Description=Pager Monitor decoder (rtl_fm + multimon-ng)
+After=network.target
+Wants=pager-web.service
+
+[Service]
+Type=simple
+User=pager
+Group=pager
+SupplementaryGroups=plugdev
+EnvironmentFile=/etc/pager-monitor/pager-monitor.env
+WorkingDirectory=/opt/pager-monitor
+ExecStart=/opt/pager-monitor/venv/bin/python -m app.decoder
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=15
+
+# Hardening (USB access still allowed for the dongle)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/pager-monitor
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}History · Pager Monitor{% endblock %}
+{% block content %}
+<h1>History</h1>
+<form method="get" action="/history" class="filters">
+  <label>Text <input name="q" type="search" value="{{ f.q }}" placeholder="contains…"></label>
+  <label>Capcode <input name="capcode" value="{{ f.capcode }}" placeholder="1234567 or 1000-1999" inputmode="numeric"></label>
+  <label>Protocol
+    <select name="protocol">
+      <option value="">Any</option>
+      {% for p in ['POCSAG', 'FLEX'] %}<option {% if f.protocol == p %}selected{% endif %}>{{ p }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Channel
+    <select name="channel">
+      <option value="">Any</option>
+      {% for c in channels %}<option value="{{ c.id }}" {% if f.channel == c.id|string %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>From <input name="start" type="datetime-local" value="{{ f.start }}"></label>
+  <label>To <input name="end" type="datetime-local" value="{{ f.end }}"></label>
+  <div class="filter-actions">
+    <button class="primary">Search</button>
+    <a class="button" href="/history">Clear</a>
+    <a class="button" href="/history.csv{% if qs %}?{{ qs }}{% endif %}">Export CSV</a>
+  </div>
+</form>
+
+<p class="muted">{{ total }} message{{ '' if total == 1 else 's' }}{% if pages > 1 %} · page {{ page }} of {{ pages }}{% endif %}</p>
+
+<div class="table-wrap">
+  <table class="messages">
+    <thead><tr><th>Time</th><th>Channel</th><th>Proto</th><th>Capcode</th><th>Message</th></tr></thead>
+    <tbody>
+    {% for m in rows %}
+      <tr class="type-{{ m.msg_type }}">
+        <td class="time">{{ m.ts|ts }}</td>
+        <td>{{ m.channel_name }}</td>
+        <td><span class="proto">{{ m.protocol }}</span>{% if m.function %}<span class="fn">{{ m.function }}</span>{% endif %}</td>
+        <td class="cap">{{ m.capcode }}{% if m.alias %}<span class="alias">{{ m.alias }}</span>{% endif %}</td>
+        <td class="msg">{% if m.message %}{{ m.message }}{% else %}<span class="muted">({{ m.msg_type }})</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if not rows %}<p class="empty">No messages match.</p>{% endif %}
+</div>
+
+{% if pages > 1 %}
+<nav class="pager">
+  {% if page > 1 %}<a class="button" href="/history?{{ qs }}{% if qs %}&amp;{% endif %}page={{ page - 1 }}">Newer</a>{% endif %}
+  {% if page < pages %}<a class="button" href="/history?{{ qs }}{% if qs %}&amp;{% endif %}page={{ page + 1 }}">Older</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

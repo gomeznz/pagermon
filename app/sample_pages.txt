@@ -1,0 +1,8 @@
+POCSAG1200: Address: 1234567  Function: 3  Alpha:   ASI TEST PAGE 1 - pager monitor online<NUL>
+POCSAG512: Address:  204800  Function: 0  Numeric: 0393141471
+POCSAG1200: Address: 1234568  Function: 2
+FLEX|2026-10-17 16:40:00|1600/2/K/A|05.120|001900100|ALN|Test FLEX alpha message from bench generator
+POCSAG2400: Address:  777001  Function: 3  Alpha:   Bench test 2400 baud: the quick brown fox jumps over the lazy dog<ETX>
+FLEX|2026-10-17 16:41:00|3200/4/K/B|05.121|001900101|NUM|12345 67890
+FLEX|2026-10-17 16:42:00|1600/2/K/A|05.122|001900102|TON|
+POCSAG1200: Address: 1234567  Function: 3  Alpha:   Alert test: capcode 1234567 is flagged in Aliases

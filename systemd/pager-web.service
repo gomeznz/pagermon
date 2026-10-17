@@ -1,0 +1,26 @@
+[Unit]
+Description=Pager Monitor web interface
+After=network.target
+
+[Service]
+Type=simple
+User=pager
+Group=pager
+EnvironmentFile=/etc/pager-monitor/pager-monitor.env
+WorkingDirectory=/opt/pager-monitor
+ExecStart=/opt/pager-monitor/venv/bin/python -m app.web
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/lib/pager-monitor
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Users · Pager Monitor{% endblock %}
+{% block content %}
+<h1>Users</h1>
+<p class="muted"><strong>Admins</strong> can change configuration and manage users. <strong>Viewers</strong> can see messages only. A capcode filter limits which messages a user can see; leave it blank for all.</p>
+
+{% for u in users %}
+<section class="card user-card">
+  <div class="user-head">
+    <h2>{{ u.username }}{% if u.id == user.id %} <span class="tag">you</span>{% endif %}</h2>
+    <span class="muted small">Last sign-in: {{ u.last_login|ts }}</span>
+  </div>
+  <form method="post" action="/users/{{ u.id }}/update" class="grid">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Role
+      <select name="role">
+        <option value="viewer" {% if u.role == 'viewer' %}selected{% endif %}>viewer</option>
+        <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>admin</option>
+      </select>
+    </label>
+    <label>Capcode filter <input name="capcode_filter" value="{{ u.capcode_filter }}" placeholder="all"></label>
+    <label class="check"><input type="checkbox" name="active" value="1" {% if u.active %}checked{% endif %}> Active</label>
+    <div class="form-actions"><button>Save</button></div>
+  </form>
+  <div class="user-foot">
+    <form method="post" action="/users/{{ u.id }}/password" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input name="password" type="password" placeholder="New password" autocomplete="new-password" minlength="10" required aria-label="New password for {{ u.username }}">
+      <button>Reset password</button>
+    </form>
+    {% if u.id != user.id %}
+    <form method="post" action="/users/{{ u.id }}/delete" class="confirm" data-confirm="Delete user {{ u.username }}?">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="danger">Delete</button>
+    </form>
+    {% endif %}
+  </div>
+</section>
+{% endfor %}
+
+<section class="card">
+  <h2>Add user</h2>
+  <form method="post" action="/users/create" class="grid">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Username <input name="username" required autocapitalize="none" pattern="[A-Za-z0-9._\-]{2,32}"></label>
+    <label>Password <input name="password" type="password" required minlength="10" autocomplete="new-password">
+      <small>At least 10 characters.</small></label>
+    <label>Role
+      <select name="role"><option>viewer</option><option>admin</option></select>
+    </label>
+    <label>Capcode filter <input name="capcode_filter" placeholder="all"></label>
+    <div class="span2 form-actions"><button class="primary">Add user</button></div>
+  </form>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/confirm.js?v={{ version }}"></script>{% endblock %}

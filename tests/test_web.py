@@ -1,0 +1,171 @@
+import re
+import time
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app import auth, db, web
+
+
+@pytest.fixture(scope="module")
+def app():
+    application = web.create_app()
+    conn = db.connect()
+    conn.execute("DELETE FROM users")
+    conn.execute("DELETE FROM messages")
+    for name, role, filt in (("alex", "admin", ""), ("viewer1", "viewer", "1000-1999, 5555")):
+        conn.execute(
+            "INSERT INTO users (username, pw_hash, role, capcode_filter, created_at) VALUES (?,?,?,?,?)",
+            (name, auth.hash_password("correct horse battery"), role, filt, time.time()))
+    for cap, msg in (("1500", "in range"), ("5555", "exact"), ("9999", "hidden from viewer")):
+        conn.execute(
+            "INSERT INTO messages (ts, channel_name, protocol, capcode, msg_type, message) "
+            "VALUES (?, 'Test', 'POCSAG1200', ?, 'alpha', ?)", (time.time(), cap, msg))
+    conn.close()
+    return application
+
+
+def csrf_of(html: str) -> str:
+    return re.search(r'name="csrf" value="([^"]+)"', html).group(1)
+
+
+def login(client, username, password="correct horse battery"):
+    r = client.get("/login")
+    token = csrf_of(r.text)
+    return client.post("/login", data={"username": username, "password": password,
+                                       "csrf": token, "next": "/"}, follow_redirects=False)
+
+
+def test_requires_login(app):
+    c = TestClient(app)
+    r = c.get("/", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/login")
+    assert c.get("/api/messages").status_code == 401
+
+
+def test_login_and_live(app):
+    c = TestClient(app)
+    r = login(c, "alex")
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    r = c.get("/")
+    assert r.status_code == 200 and "Decoder" in r.text or "Live" in r.text
+    assert "Content-Security-Policy" in r.headers
+
+
+def test_bad_password_and_lockout(app):
+    c = TestClient(app)
+    for _ in range(5):
+        r = login(c, "lockme", "wrong password!")
+        assert r.headers["location"].startswith("/login")
+    r = login(c, "lockme", "wrong password!")
+    r = c.get("/login")
+    assert "Too many failed attempts" in r.text
+    web.limiter.clear("u:lockme", "ip:testclient")
+
+
+def test_login_requires_csrf(app):
+    c = TestClient(app)
+    c.get("/login")
+    r = c.post("/login", data={"username": "alex", "password": "correct horse battery"},
+               follow_redirects=False)
+    assert r.status_code == 403
+
+
+def test_viewer_filter_and_forbidden(app):
+    c = TestClient(app)
+    login(c, "viewer1")
+    msgs = c.get("/api/messages").json()["messages"]
+    caps = sorted(m["capcode"] for m in msgs)
+    assert caps == ["1500", "5555"]
+    assert "hidden from viewer" not in c.get("/history").text
+    assert c.get("/config").status_code == 403
+    assert c.get("/users").status_code == 403
+    csv_text = c.get("/history.csv").text
+    assert "9999" not in csv_text and "1500" in csv_text
+
+
+def test_admin_sees_all_and_search(app):
+    c = TestClient(app)
+    login(c, "alex")
+    assert len(c.get("/api/messages").json()["messages"]) == 3
+    r = c.get("/history", params={"q": "exact"})
+    assert "exact" in r.text and "in range" not in r.text
+    r = c.get("/history", params={"q": "%"})  # LIKE wildcard is escaped
+    assert "0 messages" in r.text
+
+
+def test_channel_crud_bumps_config_version(app):
+    c = TestClient(app)
+    login(c, "alex")
+    token = csrf_of(c.get("/config").text)
+    conn = db.connect()
+    before = int(db.get_setting(conn, "config_version"))
+    r = c.post("/config/channel", data={
+        "csrf": token, "name": "Bench", "freq_mhz": "157.45", "device": "0", "gain": "auto",
+        "ppm": "2", "squelch": "0", "protocols": ["POCSAG1200", "FLEX"], "pocsag_mode": "auto",
+        "enabled": "1"}, follow_redirects=False)
+    assert r.status_code == 303
+    row = conn.execute("SELECT * FROM channels WHERE name = 'Bench'").fetchone()
+    assert row["freq_hz"] == 157450000 and row["protocols"] == "POCSAG1200,FLEX"
+    assert int(db.get_setting(conn, "config_version")) == before + 1
+    # bad input is rejected
+    c.post("/config/channel", data={"csrf": token, "name": "X", "freq_mhz": "5",
+                                    "protocols": ["FLEX"], "extra_rtl": "; rm -rf /"})
+    assert conn.execute("SELECT COUNT(*) FROM channels WHERE name = 'X'").fetchone()[0] == 0
+    conn.close()
+
+
+def test_cannot_remove_last_admin(app):
+    c = TestClient(app)
+    login(c, "alex")
+    token = csrf_of(c.get("/users").text)
+    conn = db.connect()
+    uid = conn.execute("SELECT id FROM users WHERE username='alex'").fetchone()[0]
+    c.post(f"/users/{uid}/update", data={"csrf": token, "role": "viewer", "active": "1"})
+    assert conn.execute("SELECT role FROM users WHERE id=?", (uid,)).fetchone()[0] == "admin"
+    conn.close()
+
+
+def test_password_reset_signs_out_other_sessions(app):
+    a = TestClient(app)
+    login(a, "alex")
+    v = TestClient(app)
+    login(v, "viewer1")
+    assert v.get("/api/messages").status_code == 200
+    token = csrf_of(a.get("/users").text)
+    conn = db.connect()
+    vid = conn.execute("SELECT id FROM users WHERE username='viewer1'").fetchone()[0]
+    a.post(f"/users/{vid}/password", data={"csrf": token, "password": "a brand new password"})
+    assert v.get("/api/messages").status_code == 401
+    conn.close()
+
+
+def test_websocket_rejects_cross_origin(app):
+    c = TestClient(app)
+    login(c, "alex")
+    from starlette.websockets import WebSocketDisconnect
+    with pytest.raises(WebSocketDisconnect):
+        with c.websocket_connect("/ws", headers={"origin": "http://evil.example"}) as ws:
+            ws.receive_json()
+
+
+def test_websocket_feed(app):
+    c = TestClient(app)
+    login(c, "viewer1", "a brand new password")  # reset by the previous test
+    with c.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
+        first = ws.receive_json()
+        assert first["type"] == "messages"
+        assert sorted(m["capcode"] for m in first["messages"]) == ["1500", "5555"]
+        status = ws.receive_json()
+        assert status["type"] == "status"
+
+
+def test_safe_next():
+    assert web._safe_next("//evil.com") == "/"
+    assert web._safe_next("https://evil.com") == "/"
+    assert web._safe_next("/history?x=1") == "/history?x=1"
+
+
+def test_csv_formula_guard():
+    assert web._csv_safe("=HYPERLINK(1)") == "'=HYPERLINK(1)"
+    assert web._csv_safe("hello") == "hello"

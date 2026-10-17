@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Config · Pager Monitor{% endblock %}
+{% block content %}
+<h1>Configuration</h1>
+
+<section class="card">
+  <h2>Channels</h2>
+  <p class="muted">One RTL-SDR dongle receives one frequency. Saving any change restarts the decoder within a few seconds.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Name</th><th>MHz</th><th>Dongle</th><th>Gain</th><th>PPM</th><th>Protocols</th><th>State</th><th></th></tr></thead>
+      <tbody>
+      {% for c in channels %}
+        <tr>
+          <td>{{ c.name }}</td>
+          <td class="mono">{{ c.freq_hz|mhz }}</td>
+          <td class="mono">{{ c.device }}</td>
+          <td>{{ c.gain }}</td>
+          <td>{{ c.ppm }}</td>
+          <td class="small">{{ c.protocols|replace(',', ', ') }}</td>
+          <td>{% if c.enabled %}<span class="tag ok">enabled</span>{% else %}<span class="tag">disabled</span>{% endif %}</td>
+          <td class="actions">
+            <a class="button small" href="/config?edit={{ c.id }}#channel-form">Edit</a>
+            <form method="post" action="/config/channel/{{ c.id }}/delete" class="confirm" data-confirm="Delete channel {{ c.name }}?">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="small danger">Delete</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="8" class="muted">No channels yet. Add one below.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% set e = editing %}
+  <h3 id="channel-form">{% if e %}Edit {{ e.name }}{% else %}Add channel{% endif %}</h3>
+  <form method="post" action="/config/channel" class="grid">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="id" value="{{ e.id if e else 0 }}">
+    <label>Name <input name="name" required maxlength="40" value="{{ e.name if e else '' }}" placeholder="Test pager"></label>
+    <label>Frequency (MHz) <input name="freq_mhz" required inputmode="decimal" value="{{ e.freq_hz|mhz if e else '' }}" placeholder="157.4500"></label>
+    <label>Dongle <input name="device" value="{{ e.device if e else '0' }}" placeholder="0 or serial">
+      <small>Index (0, 1…) or serial number. Serials stay stable across reboots.</small></label>
+    <label>Gain <input name="gain" value="{{ e.gain if e else 'auto' }}" placeholder="auto or 40.2"></label>
+    <label>PPM correction <input name="ppm" inputmode="numeric" value="{{ e.ppm if e else 0 }}"></label>
+    <label>Squelch <input name="squelch" inputmode="numeric" value="{{ e.squelch if e else 0 }}">
+      <small>0 = off. Pagers decode best with squelch off.</small></label>
+    <fieldset class="span2">
+      <legend>Protocols</legend>
+      {% set chosen = (e.protocols if e else 'POCSAG512,POCSAG1200,POCSAG2400,FLEX').split(',') %}
+      {% for p in protocols %}
+        <label class="check"><input type="checkbox" name="protocols" value="{{ p }}" {% if p in chosen %}checked{% endif %}> {{ p }}</label>
+      {% endfor %}
+    </fieldset>
+    <label>POCSAG message decoding
+      <select name="pocsag_mode">
+        {% for m in ['auto', 'alpha', 'numeric', 'skyper'] %}
+        <option {% if e and e.pocsag_mode == m %}selected{% endif %}>{{ m }}</option>
+        {% endfor %}
+      </select>
+      <small>"auto" uses the function bits; force alpha if your pagers' text shows as numbers.</small></label>
+    <label class="check"><input type="checkbox" name="enabled" value="1" {% if not e or e.enabled %}checked{% endif %}> Enabled</label>
+    <details class="span2">
+      <summary>Advanced</summary>
+      <div class="grid">
+        <label>Extra rtl_fm arguments <input name="extra_rtl" class="mono" value="{{ e.extra_rtl if e else '' }}" placeholder="-T"></label>
+        <label>Extra multimon-ng arguments <input name="extra_mm" class="mono" value="{{ e.extra_mm if e else '' }}" placeholder="-e"></label>
+      </div>
+    </details>
+    <div class="span2 form-actions">
+      <button class="primary">{% if e %}Save channel{% else %}Add channel{% endif %}</button>
+      {% if e %}<a class="button" href="/config">Cancel</a>{% endif %}
+    </div>
+  </form>
+</section>
+
+<section class="card" id="aliases">
+  <h2>Capcode aliases</h2>
+  <p class="muted">Label capcodes you know, such as your own test pagers. Tick Alert to send matching pages to the webhook.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Capcode</th><th>Label</th><th>Alert</th><th></th></tr></thead>
+      <tbody>
+      {% for a in aliases %}
+        <tr>
+          <td class="mono">{{ a.capcode }}</td><td>{{ a.label }}</td>
+          <td>{% if a.alert %}<span class="tag ok">on</span>{% endif %}</td>
+          <td class="actions">
+            <form method="post" action="/config/alias/{{ a.id }}/delete">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="small danger">Remove</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="muted">No aliases yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <form method="post" action="/config/alias" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="capcode" placeholder="Capcode" inputmode="numeric" required aria-label="Capcode">
+    <input name="label" placeholder="Label" required maxlength="60" aria-label="Label">
+    <label class="check"><input type="checkbox" name="alert" value="1"> Alert</label>
+    <button>Save alias</button>
+  </form>
+</section>
+
+<section class="card" id="settings">
+  <h2>Settings</h2>
+  <form method="post" action="/config/settings" class="grid">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Keep messages for (days) <input name="retention_days" inputmode="numeric" value="{{ s.retention_days }}">
+      <small>0 keeps everything.</small></label>
+    <label>Ignore repeats within (seconds) <input name="dedupe_seconds" inputmode="numeric" value="{{ s.dedupe_seconds }}">
+      <small>Same capcode and text. 0 keeps every copy.</small></label>
+    <label class="span2">Alert webhook URL <input name="webhook_url" class="mono" value="{{ s.webhook_url }}" placeholder="https://…">
+      <small>Pages to alert-flagged capcodes are POSTed here as JSON.</small></label>
+    <div class="span2 form-actions"><button class="primary">Save settings</button></div>
+  </form>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/confirm.js?v={{ version }}"></script>{% endblock %}

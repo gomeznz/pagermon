@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Live · Pager Monitor{% endblock %}
+{% block content %}
+<section class="status-strip" id="status" aria-live="polite">
+  <div class="pill" id="decoder-pill"><span class="dot"></span>Connecting…</div>
+  <div id="channel-status" class="channels"></div>
+</section>
+
+<div class="toolbar">
+  <input id="filter" type="search" placeholder="Filter capcode, alias or text" aria-label="Filter messages">
+  <select id="channel-filter" aria-label="Channel">
+    <option value="">All channels</option>
+    {% for c in channels %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+  </select>
+  <label class="check"><input type="checkbox" id="hide-tone"> Hide tone-only</label>
+  <button id="pause" type="button">Pause</button>
+  <span class="count" id="count"></span>
+</div>
+
+<div class="table-wrap">
+  <table class="messages" id="messages">
+    <thead>
+      <tr><th>Time</th><th>Channel</th><th>Proto</th><th>Capcode</th><th>Message</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <p class="empty" id="empty">No messages yet. They'll appear here as they decode.</p>
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/live.js?v={{ version }}"></script>{% endblock %}
