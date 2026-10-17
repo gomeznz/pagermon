@@ -1,5 +1,5 @@
 [Unit]
-Description=Pager Monitor decoder (rtl_fm + multimon-ng)
+Description=MultipagePlus decoder (rtl_fm + multimon-ng)
 After=network.target
 Wants=pager-web.service
 

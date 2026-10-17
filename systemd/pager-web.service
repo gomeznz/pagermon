@@ -1,5 +1,5 @@
 [Unit]
-Description=Pager Monitor web interface
+Description=MultipagePlus web interface
 After=network.target
 
 [Service]

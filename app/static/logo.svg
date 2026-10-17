@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 80">
+  <title>MultipagePlus</title>
+  <g transform="translate(8 8)">
+    <rect width="64" height="64" rx="14" fill="#0f766e"/>
+    <rect x="21" y="9" width="33" height="25" rx="5" fill="#5eead4" opacity="0.45"/>
+    <rect x="15.5" y="14.5" width="35" height="27" rx="5.5" fill="#99f6e4" opacity="0.75"/>
+    <rect x="9" y="21" width="39" height="32" rx="6.5" fill="#f0fdfa"/>
+    <rect x="14" y="26" width="29" height="12" rx="2.5" fill="#0f766e"/>
+    <rect x="17" y="29.5" width="16" height="2" rx="1" fill="#99f6e4"/>
+    <rect x="17" y="33" width="10" height="2" rx="1" fill="#99f6e4"/>
+    <circle cx="18" cy="45.5" r="2.4" fill="#0f766e"/>
+    <circle cx="25" cy="45.5" r="2.4" fill="#0f766e"/>
+    <circle cx="47.5" cy="47.5" r="11" fill="#f59e0b" stroke="#0f766e" stroke-width="3"/>
+    <path d="M47.5 41.5v12M41.5 47.5h12" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round"/>
+  </g>
+  <text x="88" y="52" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="36" font-weight="700" letter-spacing="-0.5" fill="#0f766e">Multipage<tspan fill="#d97706">Plus</tspan></text>
+</svg>

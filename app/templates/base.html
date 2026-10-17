@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Pager Monitor{% endblock %}</title>
+  <title>{% block title %}MultipagePlus{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css?v={{ version }}">
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 </head>
 <body>
 {% if user %}
 <header class="topbar">
-  <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span>Pager Monitor</a>
+  <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark">Multipage<span class="plus">Plus</span></span></a>
   <nav>
     <a href="/" {% if page_name == 'live' %}aria-current="page"{% endif %}>Live</a>
     <a href="/history" {% if page_name == 'history' %}aria-current="page"{% endif %}>History</a>
@@ -36,7 +36,7 @@
   {% endfor %}
   {% block content %}{% endblock %}
 </main>
-<footer class="foot">Pager Monitor {{ version }}</footer>
+<footer class="foot">MultipagePlus {{ version }}</footer>
 {% block scripts %}{% endblock %}
 </body>
 </html>

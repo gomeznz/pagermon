@@ -28,7 +28,7 @@ def _ask_password() -> str:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="pager-admin", description="Pager Monitor admin")
+    ap = argparse.ArgumentParser(prog="pager-admin", description="MultipagePlus admin")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init", help="create the database")
     a = sub.add_parser("add-user", help="add a user")

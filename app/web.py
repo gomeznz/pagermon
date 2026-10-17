@@ -178,7 +178,7 @@ def create_app() -> FastAPI:
     secret = db.get_setting(conn, "session_secret")
     conn.close()
 
-    app = FastAPI(title="Pager Monitor", docs_url=None, redoc_url=None,
+    app = FastAPI(title="MultipagePlus", docs_url=None, redoc_url=None,
                   openapi_url=None, lifespan=lifespan)
     app.add_middleware(
         SessionMiddleware, secret_key=secret, session_cookie="pm_session",

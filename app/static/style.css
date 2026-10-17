@@ -15,6 +15,7 @@
   --warn: #a15c07;
   --warn-soft: #fbefd5;
   --new: #fff7d6;
+  --plus: #d97706;
   --radius: 10px;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
@@ -39,6 +40,7 @@
     --warn: #fbbf24;
     --warn-soft: #3a2b0c;
     --new: #2c2a14;
+    --plus: #fbbf24;
   }
 }
 
@@ -226,3 +228,9 @@ td.actions form { margin: 0 0 0 0.35rem; display: inline-block; }
   .messages td.msg { grid-column: 1 / -1; min-width: 0; margin-top: 0.25rem; }
   .alias { display: inline; margin-left: 0.4rem; }
 }
+
+/* Wordmark: Multipage + amber Plus */
+.plus { color: var(--plus); }
+.brand { letter-spacing: -0.01em; }
+.brand-mark { border-radius: 5px; }
+main.login h1 .brand-mark { width: 34px; height: 34px; }

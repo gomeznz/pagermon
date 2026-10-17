@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pager Monitor installer for Raspberry Pi OS (Bookworm or later, 64-bit).
+# MultipagePlus installer for Raspberry Pi OS (Bookworm or later, 64-bit).
 #
 #   sudo ./install.sh                 install or upgrade
 #   sudo ./install.sh --rtlsdr-blog   also build the RTL-SDR Blog driver (needed for V4 dongles)
@@ -86,7 +86,7 @@ chmod 750 "$DATA_DIR"
 if [[ ! -f $ENV_FILE ]]; then
   say "Writing default settings to $ENV_FILE"
   cat > "$ENV_FILE" <<EOF
-# Pager Monitor deployment settings. Restart both services after editing:
+# MultipagePlus deployment settings. Restart both services after editing:
 #   sudo systemctl restart pager-decoder pager-web
 PAGER_DB=$DATA_DIR/pager.db
 PAGER_BIND=0.0.0.0
@@ -107,7 +107,7 @@ chmod 640 "$ENV_FILE"
 say "Installing admin command"
 cat > /usr/local/bin/pager-admin <<EOF
 #!/bin/sh
-# Pager Monitor admin: pager-admin add-user NAME | reset-password NAME | list-users
+# MultipagePlus admin: pager-admin add-user NAME | reset-password NAME | list-users
 set -a; . $ENV_FILE; set +a
 cd $APP_DIR && exec sudo -E -u pager $APP_DIR/venv/bin/python -m app.cli "\$@"
 EOF

@@ -1,4 +1,11 @@
-# Pager Monitor
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="app/static/logo-dark.svg">
+    <img src="app/static/logo.svg" alt="MultipagePlus" width="360">
+  </picture>
+</p>
+
+# MultipagePlus
 
 POCSAG and FLEX paging receiver for a Raspberry Pi 4 and an RTL-SDR dongle, with a web front end, configuration UI and access control. For testing your own pagers and paging equipment.
 
