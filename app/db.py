@@ -80,6 +80,18 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS kiosks (
+    id             INTEGER PRIMARY KEY,
+    name           TEXT NOT NULL,
+    token          TEXT NOT NULL UNIQUE,
+    capcode_filter TEXT NOT NULL DEFAULT '',
+    theme          TEXT NOT NULL DEFAULT 'dark' CHECK (theme IN ('dark', 'light', 'auto')),
+    hide_tone      INTEGER NOT NULL DEFAULT 0,
+    active         INTEGER NOT NULL DEFAULT 1,
+    created_at     REAL NOT NULL,
+    last_seen      REAL
+);
+
 CREATE TABLE IF NOT EXISTS keywords (
     id       INTEGER PRIMARY KEY,
     keyword  TEXT NOT NULL UNIQUE COLLATE NOCASE,

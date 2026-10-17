@@ -310,3 +310,47 @@ def test_keywords(app):
     c.post(f"/config/keyword/{kid}/delete", data={"csrf": token})
     assert conn.execute("SELECT COUNT(*) FROM keywords WHERE id=?", (kid,)).fetchone()[0] == 0
     conn.close()
+
+
+def test_kiosk(app):
+    conn = db.connect()
+    conn.execute("DELETE FROM kiosks")
+    conn.execute("INSERT OR REPLACE INTO aliases (capcode, label, alert, suppress, colour) "
+                 "VALUES ('1601', '', 0, 1, '')")
+    c = TestClient(app)
+    login(c, "alex")
+    token = csrf_of(c.get("/config").text)
+    c.post("/config/kiosk", data={"csrf": token, "name": "Workshop", "capcode_filter": "1600-1601"})
+    k = conn.execute("SELECT * FROM kiosks WHERE name='Workshop'").fetchone()
+    assert k and len(k["token"]) >= 30
+    assert f"/kiosk/{k['token']}" in c.get("/config").text
+
+    anon = TestClient(app)  # no login
+    r = anon.get(f"/kiosk/{k['token']}")
+    assert r.status_code == 200 and "Workshop" in r.text and "kiosk.js" in r.text
+    assert anon.get("/kiosk/not-a-real-token").status_code == 404
+    with anon.websocket_connect(f"/kiosk/{k['token']}/ws", headers={"origin": "http://testserver"}) as ws:
+        msgs = ws.receive_json()["messages"]
+        caps = {m["capcode"] for m in msgs}
+        assert caps == {"1600"}  # filter applied, suppressed 1601 never sent
+        assert ws.receive_json()["type"] == "status"
+    from starlette.websockets import WebSocketDisconnect
+    with pytest.raises(WebSocketDisconnect):
+        with anon.websocket_connect(f"/kiosk/{k['token']}/ws", headers={"origin": "http://evil.example"}) as ws:
+            ws.receive_json()
+    # the kiosk link grants nothing else
+    assert anon.get("/api/messages").status_code == 401
+
+    # new link revokes the old one; disable takes it offline
+    c.post(f"/config/kiosk/{k['id']}/newlink", data={"csrf": token})
+    k2 = conn.execute("SELECT * FROM kiosks WHERE id=?", (k["id"],)).fetchone()
+    assert k2["token"] != k["token"] and anon.get(f"/kiosk/{k['token']}").status_code == 404
+    c.post(f"/config/kiosk/{k['id']}/toggle", data={"csrf": token})
+    assert anon.get(f"/kiosk/{k2['token']}").status_code == 404
+    c.post(f"/config/kiosk/{k['id']}/delete", data={"csrf": token})
+    assert conn.execute("SELECT COUNT(*) FROM kiosks").fetchone()[0] == 0
+    # viewers can't make kiosks
+    v = TestClient(app)
+    login(v, "viewer1", "a brand new password")
+    assert v.post("/config/kiosk", data={"csrf": "x", "name": "nope"}).status_code == 403
+    conn.close()

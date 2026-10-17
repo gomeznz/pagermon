@@ -311,10 +311,7 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws")
     async def ws_feed(websocket: WebSocket):
-        # Refuse cross-site connections: the browser always sends Origin.
-        origin = websocket.headers.get("origin", "")
-        host = websocket.headers.get("host", "")
-        if not origin or origin.split("://", 1)[-1] != host:
+        if not _same_origin(websocket):
             await websocket.close(code=1008)
             return
         conn = db.connect()
@@ -325,40 +322,10 @@ def create_app() -> FastAPI:
             return
         await websocket.accept()
         where, args = message_query(user, {})
-        try:
-            rows = conn.execute(
-                MSG_SELECT + f"WHERE {where} ORDER BY m.id DESC LIMIT 100", args
-            ).fetchall()[::-1]
-            last_id = rows[-1]["id"] if rows else (
-                conn.execute("SELECT COALESCE(MAX(id), 0) FROM messages").fetchone()[0])
-            rules = kwrules.load_rules(conn)
-            await websocket.send_json({"type": "messages", "messages": [msg_dict(r, rules) for r in rows]})
-            await websocket.send_json({"type": "status", **status_payload(conn)})
-            ticks = 0
-            while True:
-                await asyncio.sleep(1)
-                ticks += 1
-                # Re-check the session so a disabled user or reset password
-                # cuts off an open live feed too.
-                if ticks % 10 == 0:
-                    if not load_user(conn, websocket.session):
-                        await websocket.close(code=1008)
-                        return
-                    rules = kwrules.load_rules(conn)  # pick up keyword edits
-                rows = conn.execute(
-                    MSG_SELECT + f"WHERE {where} AND m.id > ? ORDER BY m.id ASC LIMIT 200",
-                    args + [last_id]).fetchall()
-                newest = conn.execute("SELECT COALESCE(MAX(id), 0) FROM messages").fetchone()[0]
-                if rows:
-                    await websocket.send_json(
-                        {"type": "messages", "messages": [msg_dict(r, rules) for r in rows]})
-                last_id = max(last_id, newest)
-                if ticks % 5 == 0:
-                    await websocket.send_json({"type": "status", **status_payload(conn)})
-        except (WebSocketDisconnect, RuntimeError):
-            pass
-        finally:
-            conn.close()
+        # Re-check the session so a disabled user or reset password
+        # cuts off an open live feed too.
+        await _feed(websocket, conn, where, args,
+                    still_allowed=lambda: load_user(conn, websocket.session) is not None)
 
     @app.get("/history", response_class=HTMLResponse)
     async def history(request: Request, q: str = "", capcode: str = "", protocol: str = "",
@@ -428,8 +395,11 @@ def create_app() -> FastAPI:
             if edit:
                 editing = conn.execute("SELECT * FROM channels WHERE id = ?", (edit,)).fetchone()
             s = {k: db.get_setting(conn, k) for k in ("retention_days", "dedupe_seconds", "webhook_url")}
+            kiosks = conn.execute("SELECT * FROM kiosks ORDER BY name COLLATE NOCASE").fetchall()
+            base_url = str(request.base_url).rstrip("/")
             return render(request, "config.html", user, channels=channels, editing=editing,
-                          s=s, protocols=VALID_PROTOCOLS, page_name="config")
+                          s=s, protocols=VALID_PROTOCOLS, kiosks=kiosks, base_url=base_url,
+                          page_name="config")
         finally:
             conn.close()
 
@@ -564,6 +534,108 @@ def create_app() -> FastAPI:
             return back("/config#settings")
         finally:
             conn.close()
+
+    # --- kiosk displays ----------------------------------------------------
+
+    def _kiosk(conn, token: str):
+        if not token or len(token) > 100:
+            return None
+        return conn.execute("SELECT * FROM kiosks WHERE token = ? AND active = 1", (token,)).fetchone()
+
+    @app.post("/config/kiosk")
+    async def create_kiosk(request: Request, csrf: str = Form(""), name: str = Form(""),
+                           capcode_filter: str = Form(""), theme: str = Form("dark"),
+                           hide_tone: str = Form("")):
+        check_csrf(request, csrf)
+        conn, user = require_user(request, admin=True)
+        try:
+            name = " ".join(name.split())[:40]
+            if not name:
+                flash(request, "Give the kiosk a name, e.g. \u201cWorkshop screen\u201d.", "error")
+                return back("/config#kiosks")
+            if auth.parse_capcode_filter(capcode_filter) is None:
+                flash(request, "Capcode filter must be capcodes or ranges, e.g. 1234567, 2000000-2000099.", "error")
+                return back("/config#kiosks")
+            theme = theme if theme in ("dark", "light", "auto") else "dark"
+            with db.transaction(conn):
+                conn.execute(
+                    "INSERT INTO kiosks (name, token, capcode_filter, theme, hide_tone, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (name, secrets.token_urlsafe(24), capcode_filter.strip(), theme,
+                     1 if hide_tone else 0, time.time()))
+                db.audit(conn, user["username"], "kiosk_create", name)
+            flash(request, f"Kiosk \u201c{name}\u201d created. Open its link on the display.")
+            return back("/config#kiosks")
+        finally:
+            conn.close()
+
+    @app.post("/config/kiosk/{kid}/{action}")
+    async def kiosk_action(request: Request, kid: int, action: str, csrf: str = Form("")):
+        check_csrf(request, csrf)
+        conn, user = require_user(request, admin=True)
+        try:
+            row = conn.execute("SELECT * FROM kiosks WHERE id = ?", (kid,)).fetchone()
+            if not row or action not in ("toggle", "newlink", "delete"):
+                return back("/config#kiosks")
+            with db.transaction(conn):
+                if action == "toggle":
+                    conn.execute("UPDATE kiosks SET active = ? WHERE id = ?", (0 if row["active"] else 1, kid))
+                    msg = f"Kiosk \u201c{row['name']}\u201d {'disabled' if row['active'] else 'enabled'}."
+                elif action == "newlink":
+                    conn.execute("UPDATE kiosks SET token = ? WHERE id = ?", (secrets.token_urlsafe(24), kid))
+                    msg = f"New link for \u201c{row['name']}\u201d. The old link has stopped working."
+                else:
+                    conn.execute("DELETE FROM kiosks WHERE id = ?", (kid,))
+                    msg = f"Kiosk \u201c{row['name']}\u201d removed."
+                db.audit(conn, user["username"], f"kiosk_{action}", row["name"])
+            flash(request, msg)
+            return back("/config#kiosks")
+        finally:
+            conn.close()
+
+    @app.get("/kiosk/{token}", response_class=HTMLResponse)
+    async def kiosk_page(request: Request, token: str):
+        conn = db.connect()
+        try:
+            k = _kiosk(conn, token)
+            if not k:
+                return HTMLResponse("<!doctype html><meta charset='utf-8'><title>Kiosk not found</title>"
+                                    "<h1>This kiosk link isn't valid any more.</h1>"
+                                    "<p>Ask an admin for a new link.</p>", status_code=404)
+            conn.execute("UPDATE kiosks SET last_seen = ? WHERE id = ?", (time.time(), k["id"]))
+            response = templates.TemplateResponse(
+                request, "kiosk.html", {"k": k, "version": __version__})
+            response.headers["Referrer-Policy"] = "no-referrer"
+            return response
+        finally:
+            conn.close()
+
+    @app.websocket("/kiosk/{token}/ws")
+    async def kiosk_ws(websocket: WebSocket, token: str):
+        if not _same_origin(websocket):
+            await websocket.close(code=1008)
+            return
+        conn = db.connect()
+        k = _kiosk(conn, token)
+        if not k:
+            conn.close()
+            await websocket.close(code=1008)
+            return
+        await websocket.accept()
+        where, args = auth.capcode_sql(k["capcode_filter"])
+        hide_tone = bool(k["hide_tone"])
+
+        def still_allowed():
+            # Disabling the kiosk, a new link or removing it cuts off open screens.
+            ok = _kiosk(conn, token) is not None
+            if ok:
+                conn.execute("UPDATE kiosks SET last_seen = ? WHERE token = ?", (time.time(), token))
+            return ok
+
+        def keep(m):
+            return not m["suppressed"] and not (hide_tone and m["msg_type"] == "tone")
+
+        await _feed(websocket, conn, where, args, still_allowed, keep=keep, backlog=60)
 
     # --- debug console (admin) -------------------------------------------
 
@@ -986,6 +1058,63 @@ def _csv_safe(value: str) -> str:
         return "'" + value
     return value
 
+
+
+def _same_origin(websocket: WebSocket) -> bool:
+    """Refuse cross-site WebSocket connections: browsers always send Origin."""
+    origin = websocket.headers.get("origin", "")
+    host = websocket.headers.get("host", "")
+    return bool(origin) and origin.split("://", 1)[-1] == host
+
+
+async def _feed(websocket: WebSocket, conn, where: str, args: list, still_allowed,
+                keep=None, backlog: int = 100, with_status: bool = True) -> None:
+    """Stream messages matching `where` to an open WebSocket until it closes.
+
+    still_allowed() is re-checked every 10 seconds; when it returns False the
+    socket is closed. keep(msg) can drop messages after rules are applied.
+    """
+    def ready(rows, rules):
+        msgs = [msg_dict(r, rules) for r in rows]
+        return [m for m in msgs if keep(m)] if keep else msgs
+
+    try:
+        rules = kwrules.load_rules(conn)
+        rows = conn.execute(
+            MSG_SELECT + f"WHERE {where} ORDER BY m.id DESC LIMIT ?", args + [backlog]
+        ).fetchall()[::-1]
+        last_id = rows[-1]["id"] if rows else (
+            conn.execute("SELECT COALESCE(MAX(id), 0) FROM messages").fetchone()[0])
+        await websocket.send_json({"type": "messages", "messages": ready(rows, rules)})
+        if with_status:
+            await websocket.send_json({"type": "status", **status_payload(conn)})
+        ticks = 0
+        while True:
+            await asyncio.sleep(1)
+            ticks += 1
+            if ticks % 10 == 0:
+                if not still_allowed():
+                    await websocket.close(code=1008)
+                    return
+                rules = kwrules.load_rules(conn)  # pick up keyword edits
+            rows = conn.execute(
+                MSG_SELECT + f"WHERE {where} AND m.id > ? ORDER BY m.id ASC LIMIT 200",
+                args + [last_id]).fetchall()
+            if rows:
+                msgs = ready(rows, rules)
+                if msgs:
+                    await websocket.send_json({"type": "messages", "messages": msgs})
+            if len(rows) == 200:
+                last_id = rows[-1]["id"]  # more waiting; continue from here next tick
+            else:
+                last_id = max(last_id, conn.execute(
+                    "SELECT COALESCE(MAX(id), 0) FROM messages").fetchone()[0])
+            if with_status and ticks % 5 == 0:
+                await websocket.send_json({"type": "status", **status_payload(conn)})
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        conn.close()
 
 def status_payload(conn) -> dict:
     hb = float(db.get_setting(conn, "decoder_heartbeat", "0") or 0)

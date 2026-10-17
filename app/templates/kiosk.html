@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" data-theme="{{ k.theme }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{{ k.name }} · MultipagePlus</title>
+  <link rel="stylesheet" href="/static/kiosk.css?v={{ version }}">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+</head>
+<body>
+<header class="k-top">
+  <div class="k-brand">
+    <span class="k-mark" aria-hidden="true"></span>
+    <span class="k-word">Multipage<span class="k-plus">Plus</span></span>
+    <span class="k-name">{{ k.name }}</span>
+  </div>
+  <div class="k-right">
+    <span class="k-status" id="k-status" title="Connecting"><span class="k-dot"></span><span id="k-status-text">Connecting…</span></span>
+    <div class="k-clock"><span id="k-time">--:--:--</span><span id="k-date"></span></div>
+  </div>
+</header>
+<div class="k-banner" id="k-banner" hidden>Connection lost — reconnecting…</div>
+<main class="k-list" id="k-list" aria-live="polite"></main>
+<p class="k-empty" id="k-empty">Waiting for pages…</p>
+<button class="k-fs" id="k-fs" type="button">Full screen</button>
+<script src="/static/kiosk.js?v={{ version }}"></script>
+</body>
+</html>

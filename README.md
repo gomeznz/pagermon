@@ -22,6 +22,7 @@ RTL-SDR ─▶ rtl_fm ─▶ multimon-ng ─▶ decoder service ─▶ SQLite �
 - **Config page** (admins): channels (frequency, dongle, gain, PPM, squelch, protocols), retention, de-duplication and alert webhook. Saving applies within a few seconds; nothing needs restarting by hand.
 - **Capcodes page** (admins): label capcodes, give each a display colour, flag them for alerts, or suppress noisy ones, with page counts and last-seen times. Admins can click any capcode on the Live or History screens to jump straight to it.
 - **Keyword rules** (admins, on the Capcodes page): words or phrases in the message text that trigger an alert, are suppressed, or get a colour, on any capcode. Matches are highlighted in the message. Whole-word or anywhere matching, case-insensitive. Alerts always win over suppression, and a keyword's colour beats the capcode's. Webhook alerts include the matched keywords.
+- **Kiosk displays** (admins create them on Config): a full-screen, read-only live view for a wall screen, opened from its own secret link with no sign-in. Large text, a clock, and alert pages that pulse red. Each kiosk can have its own capcode filter and theme. Links can be disabled, replaced or removed at any time, which cuts off open screens within seconds.
 - **Debug console** (admins): opened from Config in its own tab. Shows every raw line multimon-ng sends, rtl_fm and multimon-ng error output, and pipeline start/stop events, live. Lines that couldn't be parsed are highlighted, and the log can be filtered, paused, cleared or downloaded. The last 5,000 lines are kept.
 - **Access control**: argon2-hashed passwords, admin and viewer roles, and optional per-user capcode filters (e.g. `1234567, 2000000-2000099`). Includes login lockout after 5 failures, CSRF protection, and sign-out of other sessions on password change. An **audit log** records sign-ins, config changes, user changes and exports.
 - Runs as two hardened systemd services under an unprivileged `pager` user.
@@ -85,6 +86,18 @@ pager.local {
 ```
 
 Then in the env file set `PAGER_BIND=127.0.0.1`, `PAGER_SECURE_COOKIES=true` and `PAGER_TRUST_PROXY=true`.
+
+## Kiosk displays
+
+Create a kiosk under **Config → Kiosk displays**, then open its link on the screen. The link works without signing in, so treat it like a password, and use **New link** if it ever leaks. Suppressed pages never appear on a kiosk.
+
+To turn a spare Raspberry Pi with a monitor into a dedicated display, install Raspberry Pi OS **with desktop**, then add this to autostart (`~/.config/labwc/autostart` on current Pi OS):
+
+```
+chromium --kiosk --noerrdialogs --disable-infobars --incognito "http://<pi-address>:8080/kiosk/<token>"
+```
+
+The page keeps the screen awake where the browser allows it, hides the mouse pointer when idle, and reconnects on its own after network or receiver restarts.
 
 ## Alert webhook
 

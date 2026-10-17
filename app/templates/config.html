@@ -76,6 +76,45 @@
   </form>
 </section>
 
+<section class="card" id="kiosks">
+  <h2>Kiosk displays</h2>
+  <p class="muted">A kiosk is a full-screen, read-only Live view for a wall screen or spare monitor. It opens from its own link <strong>without signing in</strong>, so treat the link like a password: anyone who has it can watch pages. Suppressed pages are never shown on a kiosk. Disabling a kiosk, giving it a new link or removing it cuts off any screen showing it within ten seconds.</p>
+  {% if kiosks %}
+  <div class="kiosk-list">
+    {% for kk in kiosks %}
+    <div class="kiosk{% if not kk.active %} is-off{% endif %}">
+      <div class="kiosk-head">
+        <strong>{{ kk.name }}</strong>
+        {% if kk.active %}<span class="tag ok">enabled</span>{% else %}<span class="tag">disabled</span>{% endif %}
+        <span class="small muted">{{ kk.theme }} theme{% if kk.hide_tone %} · tone-only hidden{% endif %} · capcodes: {{ kk.capcode_filter or 'all' }} · last viewed {{ kk.last_seen|ts if kk.last_seen else 'never' }}</span>
+      </div>
+      <div class="kiosk-link">
+        <input class="mono" readonly value="{{ base_url }}/kiosk/{{ kk.token }}" aria-label="Kiosk link for {{ kk.name }}">
+        <button type="button" class="small copy-link">Copy</button>
+        <a class="button small" href="/kiosk/{{ kk.token }}" target="_blank" rel="noopener noreferrer">Open ↗</a>
+      </div>
+      <div class="actions kiosk-actions">
+        <form method="post" action="/config/kiosk/{{ kk.id }}/toggle"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">{% if kk.active %}Disable{% else %}Enable{% endif %}</button></form>
+        <form method="post" action="/config/kiosk/{{ kk.id }}/newlink" class="confirm" data-confirm="Make a new link for {{ kk.name }}? The current link will stop working."><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">New link</button></form>
+        <form method="post" action="/config/kiosk/{{ kk.id }}/delete" class="confirm" data-confirm="Remove kiosk {{ kk.name }}?"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Remove</button></form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <h3>Add kiosk</h3>
+  <form method="post" action="/config/kiosk" class="grid">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Name <input name="name" required maxlength="40" placeholder="Workshop screen"></label>
+    <label>Capcode filter <input name="capcode_filter" placeholder="all"><small>Optional, e.g. 1234567, 2000000-2000099.</small></label>
+    <label>Theme
+      <select name="theme"><option value="dark">Dark</option><option value="light">Light</option><option value="auto">Follow the screen's setting</option></select>
+    </label>
+    <label class="check"><input type="checkbox" name="hide_tone" value="1"> Hide tone-only pages</label>
+    <div class="span2 form-actions"><button class="primary">Create kiosk</button></div>
+  </form>
+</section>
+
 <section class="card" id="debug">
   <h2>Debug console</h2>
   <p class="muted">Watch the raw lines multimon-ng sends to MultipagePlus as they arrive, plus rtl_fm and multimon-ng error output and pipeline start/stop events. Lines MultipagePlus couldn't parse are highlighted, which is the quickest way to check a new transmitter or a multimon-ng upgrade.</p>
@@ -102,4 +141,4 @@
   </form>
 </section>
 {% endblock %}
-{% block scripts %}<script src="/static/confirm.js?v={{ version }}"></script>{% endblock %}
+{% block scripts %}<script src="/static/confirm.js?v={{ version }}"></script><script src="/static/config.js?v={{ version }}"></script>{% endblock %}
