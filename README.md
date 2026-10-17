@@ -54,6 +54,7 @@ Then open `http://<pi-address>:8080/`, sign in, go to **Config** and add a chann
 2. Find your PPM error. Either run `rtl_test -p` for a few minutes, or tune a known signal and adjust until it decodes cleanly. A TCXO dongle is usually within ±1 ppm.
 3. Start with **gain** on `auto`, **squelch** at `0` and all protocols ticked. Once you know what your transmitter sends, untick the protocols you don't need. This saves CPU and avoids false decodes.
 4. Add an **alias** for each of your test pager capcodes. Tick **Alert** if you want those pages sent to a webhook.
+5. Tick **Suppress** on any noisy capcode you don't care about (a label is optional). Its pages are still recorded but hidden on the Live screen unless you tick **Show suppressed**. History and CSV export include them, marked as suppressed. Suppressed capcodes never trigger alerts.
 
 ## Everyday admin
 

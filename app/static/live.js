@@ -7,6 +7,7 @@
   const filter = document.getElementById("filter");
   const chFilter = document.getElementById("channel-filter");
   const hideTone = document.getElementById("hide-tone");
+  const showSup = document.getElementById("show-suppressed");
   const pauseBtn = document.getElementById("pause");
   const count = document.getElementById("count");
   const pill = document.getElementById("decoder-pill");
@@ -20,6 +21,7 @@
 
   try {
     hideTone.checked = localStorage.getItem("pm.hideTone") === "1";
+    showSup.checked = localStorage.getItem("pm.showSuppressed") === "1";
   } catch (e) { /* storage unavailable */ }
 
   function el(tag, cls, text) {
@@ -30,8 +32,9 @@
   }
 
   function row(m) {
-    const tr = el("tr", "type-" + m.msg_type);
+    const tr = el("tr", "type-" + m.msg_type + (m.suppressed ? " is-suppressed" : ""));
     tr.dataset.channel = m.channel_id;
+    tr.dataset.suppressed = m.suppressed ? "1" : "0";
     tr.dataset.type = m.msg_type;
     tr.dataset.search = [m.capcode, m.alias || "", m.message, m.protocol].join(" ").toLowerCase();
     tr.appendChild(el("td", "time", m.time));
@@ -42,6 +45,7 @@
     tr.appendChild(p);
     const c = el("td", "cap", m.capcode);
     if (m.alias) c.appendChild(el("span", "alias", m.alias));
+    if (m.suppressed) c.appendChild(el("span", "tag warn sup-tag", "suppressed"));
     tr.appendChild(c);
     const msg = el("td", "msg");
     if (m.message) msg.textContent = m.message;
@@ -55,18 +59,28 @@
     if (q && !tr.dataset.search.includes(q)) return false;
     if (chFilter.value && tr.dataset.channel !== chFilter.value) return false;
     if (hideTone.checked && tr.dataset.type === "tone") return false;
+    if (!showSup.checked && tr.dataset.suppressed === "1") return false;
     return true;
   }
 
   function applyFilters() {
     let shown = 0;
+    let suppressedHidden = 0;
     for (const tr of tbody.rows) {
       const v = visible(tr);
       tr.hidden = !v;
       if (v) shown++;
+      else if (!showSup.checked && tr.dataset.suppressed === "1") suppressedHidden++;
     }
-    empty.hidden = tbody.rows.length > 0;
-    count.textContent = tbody.rows.length ? shown + " shown" + (paused && buffered.length ? " · " + buffered.length + " waiting" : "") : "";
+    empty.hidden = shown > 0;
+    empty.textContent = tbody.rows.length
+      ? "No messages match the current filters."
+      : "No messages yet. They'll appear here as they decode.";
+    const parts = [];
+    if (tbody.rows.length) parts.push(shown + " shown");
+    if (suppressedHidden) parts.push(suppressedHidden + " suppressed");
+    if (paused && buffered.length) parts.push(buffered.length + " waiting");
+    count.textContent = parts.join(" · ");
   }
 
   function add(messages, fresh) {
@@ -138,6 +152,10 @@
   });
   filter.addEventListener("input", applyFilters);
   chFilter.addEventListener("change", applyFilters);
+  showSup.addEventListener("change", function () {
+    try { localStorage.setItem("pm.showSuppressed", showSup.checked ? "1" : "0"); } catch (e) { /* ignore */ }
+    applyFilters();
+  });
   hideTone.addEventListener("change", function () {
     try { localStorage.setItem("pm.hideTone", hideTone.checked ? "1" : "0"); } catch (e) { /* ignore */ }
     applyFilters();

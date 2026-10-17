@@ -234,3 +234,10 @@ td.actions form { margin: 0 0 0 0.35rem; display: inline-block; }
 .brand { letter-spacing: -0.01em; }
 .brand-mark { border-radius: 5px; }
 main.login h1 .brand-mark { width: 34px; height: 34px; }
+
+/* Suppressed capcodes */
+.tag.warn { background: var(--warn-soft); color: var(--warn); }
+.sup-tag { display: inline-block; margin-left: 0.4rem; vertical-align: middle; font-family: var(--sans); }
+.messages tr.is-suppressed td { opacity: 0.55; }
+.messages tr.is-suppressed td.cap { opacity: 0.8; }
+tr.suppressed-row td { color: var(--muted); }

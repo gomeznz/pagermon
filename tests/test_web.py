@@ -169,3 +169,41 @@ def test_safe_next():
 def test_csv_formula_guard():
     assert web._csv_safe("=HYPERLINK(1)") == "'=HYPERLINK(1)"
     assert web._csv_safe("hello") == "hello"
+
+
+def test_suppress_alias_and_flag(app):
+    c = TestClient(app)
+    login(c, "alex")
+    token = csrf_of(c.get("/config").text)
+    # label is optional when suppressing; alert is forced off
+    r = c.post("/config/alias", data={"csrf": token, "capcode": "0009999", "label": "",
+                                      "suppress": "1", "alert": "1"}, follow_redirects=False)
+    assert r.status_code == 303
+    conn = db.connect()
+    row = conn.execute("SELECT * FROM aliases WHERE capcode = '9999'").fetchone()
+    assert row["suppress"] == 1 and row["alert"] == 0
+    msgs = {m["capcode"]: m for m in c.get("/api/messages").json()["messages"]}
+    assert msgs["9999"]["suppressed"] == 1 and msgs["1500"]["suppressed"] == 0
+    assert "suppressed" in c.get("/history").text
+    assert ",yes," in c.get("/history.csv").text
+    # toggle off again
+    c.post(f"/config/alias/{row['id']}/suppress", data={"csrf": token})
+    assert conn.execute("SELECT suppress FROM aliases WHERE id = ?", (row["id"],)).fetchone()[0] == 0
+    # no label and no suppress is refused
+    c.post("/config/alias", data={"csrf": token, "capcode": "4242", "label": ""})
+    assert conn.execute("SELECT COUNT(*) FROM aliases WHERE capcode = '4242'").fetchone()[0] == 0
+    conn.close()
+
+
+def test_migration_adds_suppress_column(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE aliases (id INTEGER PRIMARY KEY, capcode TEXT NOT NULL UNIQUE, "
+                "label TEXT NOT NULL, alert INTEGER NOT NULL DEFAULT 0)")
+    old.execute("INSERT INTO aliases (capcode, label) VALUES ('1', 'old')")
+    old.commit(); old.close()
+    db.init_db(path)
+    conn = db.connect(path)
+    assert conn.execute("SELECT suppress FROM aliases WHERE capcode='1'").fetchone()[0] == 0
+    conn.close()

@@ -153,7 +153,7 @@ def message_query(user: dict, f: dict) -> tuple[str, list]:
 
 
 MSG_SELECT = (
-    "SELECT m.*, a.label AS alias FROM messages m "
+    "SELECT m.*, a.label AS alias, COALESCE(a.suppress, 0) AS suppressed FROM messages m "
     "LEFT JOIN aliases a ON a.capcode = m.capcode "
 )
 
@@ -380,11 +380,12 @@ def create_app() -> FastAPI:
             buf = io.StringIO()
             w = csv.writer(buf)
             w.writerow(["time", "channel", "freq_mhz", "protocol", "capcode", "alias",
-                        "function", "type", "message"])
+                        "function", "type", "suppressed", "message"])
             for r in rows:
                 w.writerow([fmt_ts(r["ts"]), r["channel_name"], fmt_mhz(r["freq_hz"]),
                             r["protocol"], r["capcode"], r["alias"] or "", r["function"],
-                            r["msg_type"], _csv_safe(r["message"])])
+                            r["msg_type"], "yes" if r["suppressed"] else "",
+                            _csv_safe(r["message"])])
                 yield buf.getvalue()
                 buf.seek(0)
                 buf.truncate()
@@ -544,24 +545,53 @@ def create_app() -> FastAPI:
 
     @app.post("/config/alias")
     async def save_alias(request: Request, csrf: str = Form(""), capcode: str = Form(""),
-                         label: str = Form(""), alert: str = Form("")):
+                         label: str = Form(""), alert: str = Form(""),
+                         suppress: str = Form("")):
         check_csrf(request, csrf)
         conn, user = require_user(request, admin=True)
         try:
             capcode = capcode.strip()
             label = label.strip()[:60]
-            if not capcode.isdigit() or not label:
-                flash(request, "An alias needs a numeric capcode and a label.", "error")
+            if not capcode.isdigit():
+                flash(request, "Enter a numeric capcode.", "error")
+                return back("/config#aliases")
+            if not label and not suppress:
+                flash(request, "Give the capcode a label, or tick Suppress.", "error")
                 return back("/config#aliases")
             capcode = str(int(capcode))
+            sup = 1 if suppress else 0
+            al = 0 if sup else (1 if alert else 0)  # a suppressed capcode never alerts
             with db.transaction(conn):
                 conn.execute(
-                    "INSERT INTO aliases (capcode, label, alert) VALUES (?, ?, ?) "
-                    "ON CONFLICT(capcode) DO UPDATE SET label = excluded.label, alert = excluded.alert",
-                    (capcode, label, 1 if alert else 0))
+                    "INSERT INTO aliases (capcode, label, alert, suppress) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(capcode) DO UPDATE SET label = excluded.label, "
+                    "alert = excluded.alert, suppress = excluded.suppress",
+                    (capcode, label, al, sup))
                 db.bump_config_version(conn)
-                db.audit(conn, user["username"], "alias_save", f"{capcode} = {label}")
-            flash(request, f"Saved alias for {capcode}.")
+                db.audit(conn, user["username"], "alias_save",
+                         f"{capcode} = {label or '(no label)'}"
+                         f"{' alert' if al else ''}{' suppressed' if sup else ''}")
+            flash(request, f"Saved {capcode}." + (" Its pages are now hidden on the Live screen." if sup else ""))
+            return back("/config#aliases")
+        finally:
+            conn.close()
+
+    @app.post("/config/alias/{aid}/suppress")
+    async def toggle_suppress(request: Request, aid: int, csrf: str = Form("")):
+        check_csrf(request, csrf)
+        conn, user = require_user(request, admin=True)
+        try:
+            row = conn.execute("SELECT * FROM aliases WHERE id = ?", (aid,)).fetchone()
+            if row:
+                sup = 0 if row["suppress"] else 1
+                with db.transaction(conn):
+                    conn.execute(
+                        "UPDATE aliases SET suppress = ?, alert = CASE WHEN ? THEN 0 ELSE alert END "
+                        "WHERE id = ?", (sup, sup, aid))
+                    db.bump_config_version(conn)
+                    db.audit(conn, user["username"], "alias_suppress" if sup else "alias_unsuppress",
+                             row["capcode"])
+                flash(request, f"{row['capcode']} {'suppressed' if sup else 'no longer suppressed'}.")
             return back("/config#aliases")
         finally:
             conn.close()

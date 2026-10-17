@@ -259,7 +259,7 @@ class Decoder:
             (ts, ts, ch["id"]),
         )
         alias = self.aliases.get(page.capcode)
-        if alias and alias["alert"] and self.webhook_url:
+        if alias and alias["alert"] and not alias.get("suppress") and self.webhook_url:
             payload = {
                 "id": cur.lastrowid, "ts": ts, "channel": ch["name"],
                 "freq_hz": ch["freq_hz"], "protocol": page.protocol,

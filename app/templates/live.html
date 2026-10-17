@@ -13,6 +13,7 @@
     {% for c in channels %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
   </select>
   <label class="check"><input type="checkbox" id="hide-tone"> Hide tone-only</label>
+  <label class="check"><input type="checkbox" id="show-suppressed"> Show suppressed</label>
   <button id="pause" type="button">Pause</button>
   <span class="count" id="count"></span>
 </div>

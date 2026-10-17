@@ -33,11 +33,11 @@
     <thead><tr><th>Time</th><th>Channel</th><th>Proto</th><th>Capcode</th><th>Message</th></tr></thead>
     <tbody>
     {% for m in rows %}
-      <tr class="type-{{ m.msg_type }}">
+      <tr class="type-{{ m.msg_type }}{% if m.suppressed %} is-suppressed{% endif %}">
         <td class="time">{{ m.ts|ts }}</td>
         <td>{{ m.channel_name }}</td>
         <td><span class="proto">{{ m.protocol }}</span>{% if m.function %}<span class="fn">{{ m.function }}</span>{% endif %}</td>
-        <td class="cap">{{ m.capcode }}{% if m.alias %}<span class="alias">{{ m.alias }}</span>{% endif %}</td>
+        <td class="cap">{{ m.capcode }}{% if m.alias %}<span class="alias">{{ m.alias }}</span>{% endif %}{% if m.suppressed %}<span class="tag warn sup-tag">suppressed</span>{% endif %}</td>
         <td class="msg">{% if m.message %}{{ m.message }}{% else %}<span class="muted">({{ m.msg_type }})</span>{% endif %}</td>
       </tr>
     {% endfor %}

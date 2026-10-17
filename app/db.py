@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS aliases (
     id       INTEGER PRIMARY KEY,
     capcode  TEXT NOT NULL UNIQUE,
     label    TEXT NOT NULL,
-    alert    INTEGER NOT NULL DEFAULT 0
+    alert    INTEGER NOT NULL DEFAULT 0,
+    suppress INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -126,6 +127,7 @@ def init_db(path: Path | None = None) -> None:
     conn = connect(path)
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         for key, value in DEFAULT_SETTINGS.items():
             conn.execute(
                 "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value)
@@ -137,6 +139,13 @@ def init_db(path: Path | None = None) -> None:
         )
     finally:
         conn.close()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Bring databases from earlier versions up to the current schema."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(aliases)")}
+    if "suppress" not in cols:
+        conn.execute("ALTER TABLE aliases ADD COLUMN suppress INTEGER NOT NULL DEFAULT 0")
 
 
 def get_setting(conn: sqlite3.Connection, key: str, default: str = "") -> str:
