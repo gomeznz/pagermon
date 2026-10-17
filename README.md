@@ -19,7 +19,8 @@ RTL-SDR ─▶ rtl_fm ─▶ multimon-ng ─▶ decoder service ─▶ SQLite �
 
 - **Live feed** over WebSocket, with filtering, pause and channel status.
 - **History** with search by text, capcode or range, protocol, channel and date, plus CSV export.
-- **Config UI** (admins): channels (frequency, dongle, gain, PPM, squelch, protocols), capcode aliases, retention, de-duplication and alert webhook. Saving applies within a few seconds; nothing needs restarting by hand.
+- **Config page** (admins): channels (frequency, dongle, gain, PPM, squelch, protocols), retention, de-duplication and alert webhook. Saving applies within a few seconds; nothing needs restarting by hand.
+- **Capcodes page** (admins): label capcodes, flag them for alerts, or suppress noisy ones, with page counts and last-seen times. Admins can click any capcode on the Live or History screens to jump straight to it.
 - **Access control**: argon2-hashed passwords, admin and viewer roles, and optional per-user capcode filters (e.g. `1234567, 2000000-2000099`). Includes login lockout after 5 failures, CSRF protection, and sign-out of other sessions on password change. An **audit log** records sign-ins, config changes, user changes and exports.
 - Runs as two hardened systemd services under an unprivileged `pager` user.
 
@@ -53,7 +54,7 @@ Then open `http://<pi-address>:8080/`, sign in, go to **Config** and add a chann
 1. `rtl_test -t` should find the dongle. If it reports the device as busy, reboot so the TV driver is released.
 2. Find your PPM error. Either run `rtl_test -p` for a few minutes, or tune a known signal and adjust until it decodes cleanly. A TCXO dongle is usually within ±1 ppm.
 3. Start with **gain** on `auto`, **squelch** at `0` and all protocols ticked. Once you know what your transmitter sends, untick the protocols you don't need. This saves CPU and avoids false decodes.
-4. Add an **alias** for each of your test pager capcodes. Tick **Alert** if you want those pages sent to a webhook.
+4. On the **Capcodes** page, add a label for each of your test pager capcodes. Tick **Alert** if you want those pages sent to a webhook.
 5. Tick **Suppress** on any noisy capcode you don't care about (a label is optional). Its pages are still recorded but hidden on the Live screen unless you tick **Show suppressed**. History and CSV export include them, marked as suppressed. Suppressed capcodes never trigger alerts.
 
 ## Everyday admin

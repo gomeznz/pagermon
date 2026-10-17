@@ -76,44 +76,11 @@
   </form>
 </section>
 
-<section class="card" id="aliases">
-  <h2>Capcode aliases</h2>
-  <p class="muted">Label capcodes you know, such as your own test pagers. Tick <strong>Alert</strong> to send their pages to the webhook, or <strong>Suppress</strong> to hide a noisy capcode from the Live screen. Suppressed pages are still recorded and can be shown with <em>Show suppressed</em>.</p>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Capcode</th><th>Label</th><th>Alert</th><th>Suppressed</th><th></th></tr></thead>
-      <tbody>
-      {% for a in aliases %}
-        <tr{% if a.suppress %} class="suppressed-row"{% endif %}>
-          <td class="mono">{{ a.capcode }}</td><td>{{ a.label or '' }}</td>
-          <td>{% if a.alert %}<span class="tag ok">on</span>{% endif %}</td>
-          <td>{% if a.suppress %}<span class="tag warn">suppressed</span>{% endif %}</td>
-          <td class="actions">
-            <form method="post" action="/config/alias/{{ a.id }}/suppress">
-              <input type="hidden" name="csrf" value="{{ csrf }}">
-              <button class="small">{% if a.suppress %}Unsuppress{% else %}Suppress{% endif %}</button>
-            </form>
-            <form method="post" action="/config/alias/{{ a.id }}/delete">
-              <input type="hidden" name="csrf" value="{{ csrf }}">
-              <button class="small danger">Remove</button>
-            </form>
-          </td>
-        </tr>
-      {% else %}
-        <tr><td colspan="5" class="muted">No aliases yet.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <form method="post" action="/config/alias" class="inline">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input name="capcode" placeholder="Capcode" inputmode="numeric" required aria-label="Capcode">
-    <input name="label" placeholder="Label (optional if suppressing)" maxlength="60" aria-label="Label">
-    <label class="check"><input type="checkbox" name="alert" value="1"> Alert</label>
-    <label class="check"><input type="checkbox" name="suppress" value="1"> Suppress</label>
-    <button>Save</button>
-  </form>
+<section class="card">
+  <h2>Capcodes</h2>
+  <p class="muted">Capcode labels, alerts and suppression are on the <a href="/capcodes">Capcodes</a> page.</p>
 </section>
+
 
 <section class="card" id="settings">
   <h2>Settings</h2>

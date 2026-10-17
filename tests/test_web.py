@@ -207,3 +207,26 @@ def test_migration_adds_suppress_column(tmp_path):
     conn = db.connect(path)
     assert conn.execute("SELECT suppress FROM aliases WHERE capcode='1'").fetchone()[0] == 0
     conn.close()
+
+
+def test_capcodes_page(app):
+    c = TestClient(app)
+    login(c, "alex")
+    r = c.get("/capcodes")
+    assert r.status_code == 200 and "Add capcode" in r.text and "Last seen" in r.text
+    assert "capcode-form" not in c.get("/config").text  # moved off Config
+    r = c.get("/capcodes", params={"edit": "1500"})  # unknown capcode pre-fills the form
+    assert 'value="1500"' in r.text
+    token = csrf_of(r.text)
+    r = c.post("/config/alias", data={"csrf": token, "capcode": "1500", "label": "Bench"},
+               follow_redirects=False)
+    assert r.headers["location"] == "/capcodes"
+    assert "Edit 1500" in c.get("/capcodes", params={"edit": "1500"}).text
+    assert 'href="/capcodes?edit=1500' in c.get("/history").text
+
+
+def test_capcodes_admin_only(app):
+    c = TestClient(app)
+    login(c, "viewer1", "a brand new password")
+    assert c.get("/capcodes").status_code == 403
+    assert "cap-link" not in c.get("/history").text

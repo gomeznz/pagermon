@@ -404,10 +404,9 @@ def create_app() -> FastAPI:
             editing = None
             if edit:
                 editing = conn.execute("SELECT * FROM channels WHERE id = ?", (edit,)).fetchone()
-            aliases = conn.execute("SELECT * FROM aliases ORDER BY CAST(capcode AS INTEGER)").fetchall()
             s = {k: db.get_setting(conn, k) for k in ("retention_days", "dedupe_seconds", "webhook_url")}
             return render(request, "config.html", user, channels=channels, editing=editing,
-                          aliases=aliases, s=s, protocols=VALID_PROTOCOLS, page_name="config")
+                          s=s, protocols=VALID_PROTOCOLS, page_name="config")
         finally:
             conn.close()
 
@@ -543,6 +542,26 @@ def create_app() -> FastAPI:
         finally:
             conn.close()
 
+    @app.get("/capcodes", response_class=HTMLResponse)
+    async def capcodes(request: Request, edit: str = "", add: str = ""):
+        conn, user = require_user(request, admin=True)
+        try:
+            aliases = conn.execute(
+                "SELECT a.*, COUNT(m.id) AS pages, MAX(m.ts) AS last_seen FROM aliases a "
+                "LEFT JOIN messages m ON m.capcode = a.capcode "
+                "GROUP BY a.id ORDER BY CAST(a.capcode AS INTEGER)").fetchall()
+            e = None
+            if edit.isdigit():
+                e = conn.execute("SELECT * FROM aliases WHERE capcode = ?",
+                                 (str(int(edit)),)).fetchone()
+            prefill = str(int(add)) if add.isdigit() else ""
+            if edit.isdigit() and not e:
+                prefill = str(int(edit))
+            return render(request, "capcodes.html", user, aliases=aliases, e=e,
+                          prefill=prefill, page_name="capcodes")
+        finally:
+            conn.close()
+
     @app.post("/config/alias")
     async def save_alias(request: Request, csrf: str = Form(""), capcode: str = Form(""),
                          label: str = Form(""), alert: str = Form(""),
@@ -554,10 +573,10 @@ def create_app() -> FastAPI:
             label = label.strip()[:60]
             if not capcode.isdigit():
                 flash(request, "Enter a numeric capcode.", "error")
-                return back("/config#aliases")
+                return back("/capcodes")
             if not label and not suppress:
                 flash(request, "Give the capcode a label, or tick Suppress.", "error")
-                return back("/config#aliases")
+                return back("/capcodes")
             capcode = str(int(capcode))
             sup = 1 if suppress else 0
             al = 0 if sup else (1 if alert else 0)  # a suppressed capcode never alerts
@@ -572,7 +591,7 @@ def create_app() -> FastAPI:
                          f"{capcode} = {label or '(no label)'}"
                          f"{' alert' if al else ''}{' suppressed' if sup else ''}")
             flash(request, f"Saved {capcode}." + (" Its pages are now hidden on the Live screen." if sup else ""))
-            return back("/config#aliases")
+            return back("/capcodes")
         finally:
             conn.close()
 
@@ -592,7 +611,7 @@ def create_app() -> FastAPI:
                     db.audit(conn, user["username"], "alias_suppress" if sup else "alias_unsuppress",
                              row["capcode"])
                 flash(request, f"{row['capcode']} {'suppressed' if sup else 'no longer suppressed'}.")
-            return back("/config#aliases")
+            return back("/capcodes")
         finally:
             conn.close()
 
@@ -607,7 +626,7 @@ def create_app() -> FastAPI:
                     conn.execute("DELETE FROM aliases WHERE id = ?", (aid,))
                     db.bump_config_version(conn)
                     db.audit(conn, user["username"], "alias_delete", row["capcode"])
-            return back("/config#aliases")
+            return back("/capcodes")
         finally:
             conn.close()
 

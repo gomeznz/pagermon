@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Capcodes · MultipagePlus{% endblock %}
+{% block content %}
+<h1>Capcodes</h1>
+<section class="card" id="aliases">
+    <p class="muted">Label capcodes you know, such as your own test pagers. Tick <strong>Alert</strong> to send their pages to the webhook, or <strong>Suppress</strong> to hide a noisy capcode from the Live screen. Suppressed pages are still recorded and can be shown with <em>Show suppressed</em>.</p>
+  <div class="table-wrap">
+    <table class="capcode-table">
+      <thead><tr><th>Capcode</th><th>Label</th><th>Alert</th><th>Suppressed</th><th>Pages</th><th>Last seen</th><th></th></tr></thead>
+      <tbody>
+      {% for a in aliases %}
+        <tr{% if a.suppress %} class="suppressed-row"{% endif %}>
+          <td class="mono">{{ a.capcode }}</td><td>{{ a.label or '' }}</td>
+          <td>{% if a.alert %}<span class="tag ok">on</span>{% endif %}</td>
+          <td>{% if a.suppress %}<span class="tag warn">suppressed</span>{% endif %}</td>
+          <td class="mono">{{ a.pages }}</td>
+          <td class="time small">{{ a.last_seen|ts if a.last_seen else '—' }}</td>
+          <td class="actions">
+            <a class="button small" href="/capcodes?edit={{ a.capcode }}#capcode-form">Edit</a>
+            <form method="post" action="/config/alias/{{ a.id }}/suppress">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="small">{% if a.suppress %}Unsuppress{% else %}Suppress{% endif %}</button>
+            </form>
+            <form method="post" action="/config/alias/{{ a.id }}/delete">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="small danger">Remove</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" class="muted">No capcodes yet. Add one below.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <h3 id="capcode-form">{% if e %}Edit {{ e.capcode }}{% else %}Add capcode{% endif %}</h3>
+  <form method="post" action="/config/alias" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="capcode" placeholder="Capcode" inputmode="numeric" required aria-label="Capcode" value="{{ e.capcode if e else prefill }}">
+    <input name="label" placeholder="Label (optional if suppressing)" maxlength="60" aria-label="Label" value="{{ e.label if e else '' }}">
+    <label class="check"><input type="checkbox" name="alert" value="1" {% if e and e.alert %}checked{% endif %}> Alert</label>
+    <label class="check"><input type="checkbox" name="suppress" value="1" {% if e and e.suppress %}checked{% endif %}> Suppress</label>
+    <button class="primary">Save</button>
+    {% if e %}<a class="button" href="/capcodes">Cancel</a>{% endif %}
+  </form>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/confirm.js?v={{ version }}"></script>{% endblock %}

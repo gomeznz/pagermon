@@ -2,7 +2,9 @@
 (function () {
   "use strict";
   const MAX_ROWS = 500;
-  const tbody = document.querySelector("#messages tbody");
+  const table = document.getElementById("messages");
+  const tbody = table.querySelector("tbody");
+  const isAdmin = table.dataset.admin === "1";
   const empty = document.getElementById("empty");
   const filter = document.getElementById("filter");
   const chFilter = document.getElementById("channel-filter");
@@ -43,7 +45,15 @@
     p.appendChild(el("span", "proto", m.protocol));
     if (m.function) p.appendChild(el("span", "fn", m.function));
     tr.appendChild(p);
-    const c = el("td", "cap", m.capcode);
+    const c = el("td", "cap");
+    if (isAdmin) {
+      const a = el("a", "cap-link", m.capcode);
+      a.href = "/capcodes?edit=" + encodeURIComponent(m.capcode) + "#capcode-form";
+      a.title = "Label, alert or suppress";
+      c.appendChild(a);
+    } else {
+      c.appendChild(document.createTextNode(m.capcode));
+    }
     if (m.alias) c.appendChild(el("span", "alias", m.alias));
     if (m.suppressed) c.appendChild(el("span", "tag warn sup-tag", "suppressed"));
     tr.appendChild(c);

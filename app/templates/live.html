@@ -19,7 +19,7 @@
 </div>
 
 <div class="table-wrap">
-  <table class="messages" id="messages">
+  <table class="messages" id="messages" data-admin="{{ 1 if user.role == 'admin' else 0 }}">
     <thead>
       <tr><th>Time</th><th>Channel</th><th>Proto</th><th>Capcode</th><th>Message</th></tr>
     </thead>

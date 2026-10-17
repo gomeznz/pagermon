@@ -15,6 +15,7 @@
     <a href="/" {% if page_name == 'live' %}aria-current="page"{% endif %}>Live</a>
     <a href="/history" {% if page_name == 'history' %}aria-current="page"{% endif %}>History</a>
     {% if user.role == 'admin' %}
+    <a href="/capcodes" {% if page_name == 'capcodes' %}aria-current="page"{% endif %}>Capcodes</a>
     <a href="/config" {% if page_name == 'config' %}aria-current="page"{% endif %}>Config</a>
     <a href="/users" {% if page_name == 'users' %}aria-current="page"{% endif %}>Users</a>
     <a href="/audit" {% if page_name == 'audit' %}aria-current="page"{% endif %}>Audit</a>

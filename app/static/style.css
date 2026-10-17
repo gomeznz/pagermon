@@ -241,3 +241,24 @@ main.login h1 .brand-mark { width: 34px; height: 34px; }
 .messages tr.is-suppressed td { opacity: 0.55; }
 .messages tr.is-suppressed td.cap { opacity: 0.8; }
 tr.suppressed-row td { color: var(--muted); }
+
+.cap-link { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+.cap-link:hover { color: var(--accent); }
+
+.card > p:first-child { margin-top: 0; }
+
+/* Capcodes table becomes stacked cards on phones */
+@media (max-width: 680px) {
+  .capcode-table thead { display: none; }
+  .capcode-table, .capcode-table tbody, .capcode-table tr, .capcode-table td { display: block; width: 100%; }
+  .capcode-table tr { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.6rem; padding: 0.7rem 0.8rem; border-bottom: 1px solid var(--line); }
+  .capcode-table td { border: 0; padding: 0; width: auto; }
+  .capcode-table td:nth-child(1) { font-weight: 600; font-size: 1rem; }
+  .capcode-table td:nth-child(2) { flex: 1 1 auto; }
+  .capcode-table td:nth-child(5)::after { content: " pages"; color: var(--muted); }
+  .capcode-table td:nth-child(5), .capcode-table td:nth-child(6) { font-size: 0.8rem; color: var(--muted); }
+  .capcode-table td.actions { width: 100%; text-align: left; margin-top: 0.35rem; }
+  .capcode-table td.actions form { margin: 0 0.35rem 0 0; }
+  .capcode-table td.actions .button { margin-right: 0.35rem; }
+  .capcode-table td[colspan] { width: 100%; }
+}
