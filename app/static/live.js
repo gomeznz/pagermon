@@ -33,6 +33,19 @@
     return n;
   }
 
+  // Message text with matched keywords wrapped in <mark>, built from text nodes only.
+  function appendHighlighted(parent, text, spans) {
+    let pos = 0;
+    for (const s of spans) {
+      const start = s[0], end = s[1], colour = s[2];
+      if (start > pos) parent.appendChild(document.createTextNode(text.slice(pos, start)));
+      const mk = el("mark", "kw" + (/^[a-z]+$/.test(colour || "") ? " c-" + colour : ""), text.slice(start, end));
+      parent.appendChild(mk);
+      pos = end;
+    }
+    if (pos < text.length) parent.appendChild(document.createTextNode(text.slice(pos)));
+  }
+
   function row(m) {
     const tr = el("tr", "type-" + m.msg_type + (m.suppressed ? " is-suppressed" : "") +
       (/^[a-z]+$/.test(m.colour || "") ? " c-" + m.colour : ""));
@@ -56,10 +69,11 @@
       c.appendChild(document.createTextNode(m.capcode));
     }
     if (m.alias) c.appendChild(el("span", "alias", m.alias));
+    if (m.alert) c.appendChild(el("span", "tag alert-tag", "alert"));
     if (m.suppressed) c.appendChild(el("span", "tag warn sup-tag", "suppressed"));
     tr.appendChild(c);
     const msg = el("td", "msg");
-    if (m.message) msg.textContent = m.message;
+    if (m.message) appendHighlighted(msg, m.message, m.spans || []);
     else msg.appendChild(el("span", "muted", "(" + m.msg_type + ")"));
     tr.appendChild(msg);
     return tr;

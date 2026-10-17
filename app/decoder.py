@@ -28,6 +28,7 @@ import urllib.request
 from collections import deque
 
 from . import db, settings
+from . import rules as kwrules
 from .parser import Page, parse_line
 
 log = logging.getLogger("pager.decoder")
@@ -219,6 +220,7 @@ class Decoder:
         self.runners: dict[int, ChannelRunner] = {}
         self.config_version = ""
         self.aliases: dict[str, dict] = {}
+        self.keyword_rules: list = []
         self.dedupe_seconds = 0
         self.webhook_url = ""
         self.recent: dict[tuple[str, str], float] = {}
@@ -234,6 +236,7 @@ class Decoder:
             r["capcode"]: dict(r)
             for r in self.conn.execute("SELECT * FROM aliases")
         }
+        self.keyword_rules = kwrules.load_rules(self.conn)
         channels = [
             dict(r) for r in self.conn.execute("SELECT * FROM channels WHERE enabled = 1")
         ]
@@ -284,12 +287,15 @@ class Decoder:
             "updated_at = ? WHERE channel_id = ?",
             (ts, ts, ch["id"]),
         )
-        alias = self.aliases.get(page.capcode)
-        if alias and alias["alert"] and not alias.get("suppress") and self.webhook_url:
+        alias = self.aliases.get(page.capcode) or {}
+        res = kwrules.evaluate(page.message, self.keyword_rules,
+                               alias.get("alert", 0), alias.get("suppress", 0))
+        if res.alert and self.webhook_url:
             payload = {
                 "id": cur.lastrowid, "ts": ts, "channel": ch["name"],
                 "freq_hz": ch["freq_hz"], "protocol": page.protocol,
-                "capcode": page.capcode, "alias": alias["label"],
+                "capcode": page.capcode, "alias": alias.get("label", ""),
+                "keywords": res.keywords,
                 "type": page.msg_type, "message": page.message,
             }
             threading.Thread(

@@ -348,3 +348,11 @@ main.wide { max-width: 1600px; }
   .console .ln { grid-template-columns: 12.5ch 1fr; }
   .console .c, .console .s { display: none; }
 }
+
+/* Keyword highlights */
+mark.kw { background: color-mix(in srgb, var(--cc, var(--plus)) 22%, transparent); color: inherit;
+  border-radius: 3px; padding: 0 0.15em; box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--cc, var(--plus)) 70%, transparent); }
+.tag.alert-tag { display: inline-block; margin-left: 0.4rem; vertical-align: middle; font-family: var(--sans);
+  background: var(--bad-soft); color: var(--bad); }
+.keyword-table td:first-child { white-space: nowrap; }
+form.inline select { flex: 0 0 auto; }

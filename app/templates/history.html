@@ -37,8 +37,8 @@
         <td class="time">{{ m.ts|ts }}</td>
         <td>{{ m.channel_name }}</td>
         <td><span class="proto">{{ m.protocol }}</span>{% if m.function %}<span class="fn">{{ m.function }}</span>{% endif %}</td>
-        <td class="cap">{% if user.role == 'admin' %}<a class="cap-link" href="/capcodes?edit={{ m.capcode }}#capcode-form" title="Label, alert or suppress">{{ m.capcode }}</a>{% else %}{{ m.capcode }}{% endif %}{% if m.alias %}<span class="alias">{{ m.alias }}</span>{% endif %}{% if m.suppressed %}<span class="tag warn sup-tag">suppressed</span>{% endif %}</td>
-        <td class="msg">{% if m.message %}{{ m.message }}{% else %}<span class="muted">({{ m.msg_type }})</span>{% endif %}</td>
+        <td class="cap">{% if user.role == 'admin' %}<a class="cap-link" href="/capcodes?edit={{ m.capcode }}#capcode-form" title="Label, alert or suppress">{{ m.capcode }}</a>{% else %}{{ m.capcode }}{% endif %}{% if m.alias %}<span class="alias">{{ m.alias }}</span>{% endif %}{% if m.alert %}<span class="tag alert-tag">alert</span>{% endif %}{% if m.suppressed %}<span class="tag warn sup-tag">suppressed</span>{% endif %}</td>
+        <td class="msg">{% if m.message %}{% for text, hit, col in m.segments %}{% if hit %}<mark class="kw{% if col %} c-{{ col }}{% endif %}">{{ text }}</mark>{% else %}{{ text }}{% endif %}{% endfor %}{% else %}<span class="muted">({{ m.msg_type }})</span>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>

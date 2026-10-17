@@ -273,3 +273,40 @@ def test_debug_console(app):
     login(v, "viewer1", "a brand new password")
     assert v.get("/debug").status_code == 403 and v.get("/api/debug").status_code == 403
     conn.close()
+
+
+def test_keywords(app):
+    conn = db.connect()
+    conn.execute("DELETE FROM keywords")
+    conn.execute("INSERT INTO messages (ts, channel_name, protocol, capcode, msg_type, message) "
+                 "VALUES (?, 'Test', 'POCSAG1200', '1600', 'alpha', 'Generator FAULT at site 4')", (time.time(),))
+    conn.execute("INSERT INTO messages (ts, channel_name, protocol, capcode, msg_type, message) "
+                 "VALUES (?, 'Test', 'POCSAG1200', '1601', 'alpha', 'routine heartbeat')", (time.time(),))
+    c = TestClient(app)
+    login(c, "alex")
+    page = c.get("/capcodes")
+    assert 'id="keywords"' in page.text and "Add keyword" in page.text
+    token = csrf_of(page.text)
+    # needs at least one action
+    c.post("/config/keyword", data={"csrf": token, "keyword": "fault"})
+    assert conn.execute("SELECT COUNT(*) FROM keywords").fetchone()[0] == 0
+    c.post("/config/keyword", data={"csrf": token, "keyword": "fault", "alert": "1", "colour": "red"})
+    c.post("/config/keyword", data={"csrf": token, "keyword": "heartbeat", "suppress": "1"})
+    # duplicate (case-insensitive) refused
+    c.post("/config/keyword", data={"csrf": token, "keyword": "FAULT", "suppress": "1"})
+    assert conn.execute("SELECT COUNT(*) FROM keywords").fetchone()[0] == 2
+    msgs = {m["capcode"]: m for m in c.get("/api/messages", params={"limit": 500}).json()["messages"]}
+    assert msgs["1600"]["alert"] == 1 and msgs["1600"]["colour"] == "red"
+    assert msgs["1600"]["keywords"] == ["fault"] and msgs["1600"]["spans"] == [[10, 15, "red"]]
+    assert msgs["1601"]["suppressed"] == 1
+    hist = c.get("/history", params={"q": "FAULT"}).text
+    assert '<mark class="kw c-red">FAULT</mark>' in hist and "alert-tag" in hist
+    assert "fault" in c.get("/history.csv", params={"q": "FAULT"}).text.split("\n")[1]
+    # edit, toggle, delete
+    kid = conn.execute("SELECT id FROM keywords WHERE keyword='heartbeat'").fetchone()[0]
+    assert "Edit &ldquo;heartbeat&rdquo;" in c.get("/capcodes", params={"kw": kid}).text
+    c.post(f"/config/keyword/{kid}/suppress", data={"csrf": token})
+    assert conn.execute("SELECT suppress FROM keywords WHERE id=?", (kid,)).fetchone()[0] == 0
+    c.post(f"/config/keyword/{kid}/delete", data={"csrf": token})
+    assert conn.execute("SELECT COUNT(*) FROM keywords WHERE id=?", (kid,)).fetchone()[0] == 0
+    conn.close()

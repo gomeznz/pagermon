@@ -80,6 +80,15 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS keywords (
+    id       INTEGER PRIMARY KEY,
+    keyword  TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    match    TEXT NOT NULL DEFAULT 'word' CHECK (match IN ('word', 'contains')),
+    alert    INTEGER NOT NULL DEFAULT 0,
+    suppress INTEGER NOT NULL DEFAULT 0,
+    colour   TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS debug_log (
     id           INTEGER PRIMARY KEY,
     ts           REAL NOT NULL,

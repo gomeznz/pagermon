@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import __version__, auth, db, settings
+from . import __version__, auth, db, rules as kwrules, settings
 from .decoder import VALID_PROTOCOLS
 
 BASE = Path(__file__).parent
@@ -157,16 +157,24 @@ def message_query(user: dict, f: dict) -> tuple[str, list]:
 
 
 MSG_SELECT = (
-    "SELECT m.*, a.label AS alias, COALESCE(a.suppress, 0) AS suppressed, "
-    "COALESCE(a.colour, '') AS colour FROM messages m "
-    "LEFT JOIN aliases a ON a.capcode = m.capcode "
+    "SELECT m.*, a.label AS alias, COALESCE(a.alert, 0) AS cap_alert, "
+    "COALESCE(a.suppress, 0) AS cap_suppress, COALESCE(a.colour, '') AS cap_colour "
+    "FROM messages m LEFT JOIN aliases a ON a.capcode = m.capcode "
 )
 
 
-def msg_dict(row) -> dict:
+def msg_dict(row, rules: list) -> dict:
+    """A message ready for display, with capcode and keyword rules applied."""
     d = dict(row)
     d.pop("raw", None)
     d["time"] = fmt_ts(d["ts"])
+    res = kwrules.evaluate(d.get("message") or "", rules, d.pop("cap_alert", 0),
+                           d.pop("cap_suppress", 0), d.pop("cap_colour", ""))
+    d["alert"] = int(res.alert)
+    d["suppressed"] = int(res.suppressed)
+    d["colour"] = res.colour
+    d["keywords"] = res.keywords
+    d["spans"] = [list(s) for s in res.spans]
     return d
 
 
@@ -288,7 +296,8 @@ def create_app() -> FastAPI:
                 rows = conn.execute(
                     MSG_SELECT + f"WHERE {where} ORDER BY m.id DESC LIMIT ?",
                     args + [limit]).fetchall()[::-1]
-            return {"messages": [msg_dict(r) for r in rows]}
+            rules = kwrules.load_rules(conn)
+            return {"messages": [msg_dict(r, rules) for r in rows]}
         finally:
             conn.close()
 
@@ -322,7 +331,8 @@ def create_app() -> FastAPI:
             ).fetchall()[::-1]
             last_id = rows[-1]["id"] if rows else (
                 conn.execute("SELECT COALESCE(MAX(id), 0) FROM messages").fetchone()[0])
-            await websocket.send_json({"type": "messages", "messages": [msg_dict(r) for r in rows]})
+            rules = kwrules.load_rules(conn)
+            await websocket.send_json({"type": "messages", "messages": [msg_dict(r, rules) for r in rows]})
             await websocket.send_json({"type": "status", **status_payload(conn)})
             ticks = 0
             while True:
@@ -330,16 +340,18 @@ def create_app() -> FastAPI:
                 ticks += 1
                 # Re-check the session so a disabled user or reset password
                 # cuts off an open live feed too.
-                if ticks % 10 == 0 and not load_user(conn, websocket.session):
-                    await websocket.close(code=1008)
-                    return
+                if ticks % 10 == 0:
+                    if not load_user(conn, websocket.session):
+                        await websocket.close(code=1008)
+                        return
+                    rules = kwrules.load_rules(conn)  # pick up keyword edits
                 rows = conn.execute(
                     MSG_SELECT + f"WHERE {where} AND m.id > ? ORDER BY m.id ASC LIMIT 200",
                     args + [last_id]).fetchall()
                 newest = conn.execute("SELECT COALESCE(MAX(id), 0) FROM messages").fetchone()[0]
                 if rows:
                     await websocket.send_json(
-                        {"type": "messages", "messages": [msg_dict(r) for r in rows]})
+                        {"type": "messages", "messages": [msg_dict(r, rules) for r in rows]})
                 last_id = max(last_id, newest)
                 if ticks % 5 == 0:
                     await websocket.send_json({"type": "status", **status_payload(conn)})
@@ -364,6 +376,10 @@ def create_app() -> FastAPI:
             channels = conn.execute("SELECT id, name FROM channels ORDER BY name").fetchall()
             pages = max(1, -(-total // PAGE_SIZE))
             qs = urlencode({k: v for k, v in f.items() if v})
+            rules = kwrules.load_rules(conn)
+            rows = [msg_dict(r, rules) for r in rows]
+            for m in rows:
+                m["segments"] = kwrules.segments(m["message"], m["spans"])
             return render(request, "history.html", user, rows=rows, f=f, total=total,
                           page=page, pages=pages, qs=qs, channels=channels, page_name="history")
         finally:
@@ -376,8 +392,9 @@ def create_app() -> FastAPI:
         f = {"q": q.strip(), "capcode": capcode.strip(), "protocol": protocol,
              "channel": channel if channel.isdigit() else "", "start": start, "end": end}
         where, args = message_query(user, f)
-        rows = conn.execute(MSG_SELECT + f"WHERE {where} ORDER BY m.id DESC LIMIT 100000",
-                            args).fetchall()
+        rules = kwrules.load_rules(conn)
+        rows = [msg_dict(r, rules) for r in conn.execute(
+            MSG_SELECT + f"WHERE {where} ORDER BY m.id DESC LIMIT 100000", args)]
         db.audit(conn, user["username"], "export_csv", f"{len(rows)} rows")
         conn.close()
 
@@ -385,11 +402,12 @@ def create_app() -> FastAPI:
             buf = io.StringIO()
             w = csv.writer(buf)
             w.writerow(["time", "channel", "freq_mhz", "protocol", "capcode", "alias",
-                        "function", "type", "suppressed", "message"])
+                        "function", "type", "alert", "suppressed", "keywords", "message"])
             for r in rows:
                 w.writerow([fmt_ts(r["ts"]), r["channel_name"], fmt_mhz(r["freq_hz"]),
                             r["protocol"], r["capcode"], r["alias"] or "", r["function"],
-                            r["msg_type"], "yes" if r["suppressed"] else "",
+                            r["msg_type"], "yes" if r["alert"] else "", "yes" if r["suppressed"] else "",
+                            "; ".join(r["keywords"]),
                             _csv_safe(r["message"])])
                 yield buf.getvalue()
                 buf.seek(0)
@@ -601,7 +619,7 @@ def create_app() -> FastAPI:
             conn.close()
 
     @app.get("/capcodes", response_class=HTMLResponse)
-    async def capcodes(request: Request, edit: str = "", add: str = ""):
+    async def capcodes(request: Request, edit: str = "", add: str = "", kw: int = 0):
         conn, user = require_user(request, admin=True)
         try:
             aliases = conn.execute(
@@ -615,8 +633,11 @@ def create_app() -> FastAPI:
             prefill = str(int(add)) if add.isdigit() else ""
             if edit.isdigit() and not e:
                 prefill = str(int(edit))
+            keywords = conn.execute("SELECT * FROM keywords ORDER BY keyword COLLATE NOCASE").fetchall()
+            k = conn.execute("SELECT * FROM keywords WHERE id = ?", (kw,)).fetchone() if kw else None
             return render(request, "capcodes.html", user, aliases=aliases, e=e,
-                          prefill=prefill, colours=COLOURS, page_name="capcodes")
+                          prefill=prefill, colours=COLOURS, keywords=keywords, k=k,
+                          page_name="capcodes")
         finally:
             conn.close()
 
@@ -652,6 +673,79 @@ def create_app() -> FastAPI:
                          f"{' colour=' + colour if colour else ''}")
             flash(request, f"Saved {capcode}." + (" Its pages are now hidden on the Live screen." if sup else ""))
             return back("/capcodes")
+        finally:
+            conn.close()
+
+    @app.post("/config/keyword")
+    async def save_keyword(request: Request, csrf: str = Form(""), id: int = Form(0),
+                           keyword: str = Form(""), match: str = Form("word"),
+                           alert: str = Form(""), suppress: str = Form(""),
+                           colour: str = Form("")):
+        check_csrf(request, csrf)
+        conn, user = require_user(request, admin=True)
+        try:
+            keyword = " ".join(keyword.split())[:60]
+            if not keyword:
+                flash(request, "Enter a word or phrase.", "error")
+                return back("/capcodes#keywords")
+            match = match if match in kwrules.MATCH_MODES else "word"
+            colour = colour if colour in COLOURS else ""
+            al = 1 if alert else 0
+            sup = 0 if al else (1 if suppress else 0)  # an alerting keyword is never hidden
+            if not (al or sup or colour):
+                flash(request, "Choose at least one of Alert, Suppress or a colour for the keyword.", "error")
+                return back(f"/capcodes?kw={id}#keywords" if id else "/capcodes#keywords")
+            clash = conn.execute("SELECT id FROM keywords WHERE keyword = ? AND id != ?",
+                                 (keyword, id)).fetchone()
+            if clash:
+                flash(request, f"\u201c{keyword}\u201d is already in the list.", "error")
+                return back("/capcodes#keywords")
+            with db.transaction(conn):
+                if id:
+                    conn.execute("UPDATE keywords SET keyword=?, match=?, alert=?, suppress=?, colour=? "
+                                 "WHERE id=?", (keyword, match, al, sup, colour, id))
+                else:
+                    conn.execute("INSERT INTO keywords (keyword, match, alert, suppress, colour) "
+                                 "VALUES (?, ?, ?, ?, ?)", (keyword, match, al, sup, colour))
+                db.bump_config_version(conn)
+                db.audit(conn, user["username"], "keyword_save",
+                         f"{keyword} ({match}){' alert' if al else ''}{' suppressed' if sup else ''}"
+                         f"{' colour=' + colour if colour else ''}")
+            flash(request, f"Saved keyword \u201c{keyword}\u201d.")
+            return back("/capcodes#keywords")
+        finally:
+            conn.close()
+
+    @app.post("/config/keyword/{kid}/suppress")
+    async def toggle_keyword_suppress(request: Request, kid: int, csrf: str = Form("")):
+        check_csrf(request, csrf)
+        conn, user = require_user(request, admin=True)
+        try:
+            row = conn.execute("SELECT * FROM keywords WHERE id = ?", (kid,)).fetchone()
+            if row:
+                sup = 0 if row["suppress"] else 1
+                with db.transaction(conn):
+                    conn.execute("UPDATE keywords SET suppress = ?, "
+                                 "alert = CASE WHEN ? THEN 0 ELSE alert END WHERE id = ?", (sup, sup, kid))
+                    db.bump_config_version(conn)
+                    db.audit(conn, user["username"],
+                             "keyword_suppress" if sup else "keyword_unsuppress", row["keyword"])
+            return back("/capcodes#keywords")
+        finally:
+            conn.close()
+
+    @app.post("/config/keyword/{kid}/delete")
+    async def delete_keyword(request: Request, kid: int, csrf: str = Form("")):
+        check_csrf(request, csrf)
+        conn, user = require_user(request, admin=True)
+        try:
+            row = conn.execute("SELECT keyword FROM keywords WHERE id = ?", (kid,)).fetchone()
+            if row:
+                with db.transaction(conn):
+                    conn.execute("DELETE FROM keywords WHERE id = ?", (kid,))
+                    db.bump_config_version(conn)
+                    db.audit(conn, user["username"], "keyword_delete", row["keyword"])
+            return back("/capcodes#keywords")
         finally:
             conn.close()
 

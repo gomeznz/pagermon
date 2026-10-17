@@ -1,5 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Capcodes · MultipagePlus{% endblock %}
+{% macro swatches(cur) %}
+    <fieldset class="swatches">
+      <legend>Colour</legend>
+      <label class="swatch none" title="No colour"><input type="radio" name="colour" value="" {% if not cur %}checked{% endif %}><span>None</span></label>
+      {% for c in colours %}
+      <label class="swatch c-{{ c }}" title="{{ c|capitalize }}"><input type="radio" name="colour" value="{{ c }}" {% if cur == c %}checked{% endif %}><span class="visually-hidden">{{ c|capitalize }}</span></label>
+      {% endfor %}
+    </fieldset>
+{% endmacro %}
 {% block content %}
 <h1>Capcodes</h1>
 <section class="card" id="aliases">
@@ -40,16 +49,57 @@
     <input name="label" placeholder="Label (optional if suppressing)" maxlength="60" aria-label="Label" value="{{ e.label if e else '' }}">
     <label class="check"><input type="checkbox" name="alert" value="1" {% if e and e.alert %}checked{% endif %}> Alert</label>
     <label class="check"><input type="checkbox" name="suppress" value="1" {% if e and e.suppress %}checked{% endif %}> Suppress</label>
-    <fieldset class="swatches">
-      <legend>Colour</legend>
-      {% set cur = e.colour if e else '' %}
-      <label class="swatch none" title="No colour"><input type="radio" name="colour" value="" {% if not cur %}checked{% endif %}><span>None</span></label>
-      {% for c in colours %}
-      <label class="swatch c-{{ c }}" title="{{ c|capitalize }}"><input type="radio" name="colour" value="{{ c }}" {% if cur == c %}checked{% endif %}><span class="visually-hidden">{{ c|capitalize }}</span></label>
-      {% endfor %}
-    </fieldset>
+    {{ swatches(e.colour if e else '') }}
     <div class="form-actions"><button class="primary">Save</button>
     {% if e %}<a class="button" href="/capcodes">Cancel</a>{% endif %}</div>
+  </form>
+</section>
+
+<section class="card" id="keywords">
+  <h2>Keywords</h2>
+  <p class="muted">Match words or phrases in the message text, on any capcode. A keyword can <strong>Alert</strong>, be <strong>Suppressed</strong>, or just get a <strong>colour</strong>; matches are highlighted in the message. Matching ignores case and, by default, only matches whole words (&ldquo;fire&rdquo; won't match &ldquo;firewall&rdquo;). Alerts always win: a page that alerts, by capcode or keyword, is never hidden. A keyword's colour takes priority over the capcode's.</p>
+  <div class="table-wrap">
+    <table class="capcode-table keyword-table">
+      <thead><tr><th>Keyword</th><th>Match</th><th>Alert</th><th>Suppressed</th><th></th></tr></thead>
+      <tbody>
+      {% for w in keywords %}
+        <tr class="{% if w.suppress %}suppressed-row{% endif %}{% if w.colour %} c-{{ w.colour }}{% endif %}">
+          <td><span class="swatch-dot" aria-hidden="true"></span><mark class="kw">{{ w.keyword }}</mark></td>
+          <td class="small">{{ 'whole word' if w.match == 'word' else 'anywhere' }}</td>
+          <td>{% if w.alert %}<span class="tag ok">on</span>{% endif %}</td>
+          <td>{% if w.suppress %}<span class="tag warn">suppressed</span>{% endif %}</td>
+          <td class="actions">
+            <a class="button small" href="/capcodes?kw={{ w.id }}#keyword-form">Edit</a>
+            <form method="post" action="/config/keyword/{{ w.id }}/suppress">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="small">{% if w.suppress %}Unsuppress{% else %}Suppress{% endif %}</button>
+            </form>
+            <form method="post" action="/config/keyword/{{ w.id }}/delete" class="confirm" data-confirm="Remove keyword {{ w.keyword }}?">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="small danger">Remove</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="muted">No keywords yet. Add one below.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <h3 id="keyword-form">{% if k %}Edit &ldquo;{{ k.keyword }}&rdquo;{% else %}Add keyword{% endif %}</h3>
+  <form method="post" action="/config/keyword" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="id" value="{{ k.id if k else 0 }}">
+    <input name="keyword" placeholder="Word or phrase" required maxlength="60" aria-label="Keyword" value="{{ k.keyword if k else '' }}">
+    <select name="match" aria-label="How to match">
+      <option value="word" {% if not k or k.match == 'word' %}selected{% endif %}>Whole word</option>
+      <option value="contains" {% if k and k.match == 'contains' %}selected{% endif %}>Anywhere in text</option>
+    </select>
+    <label class="check"><input type="checkbox" name="alert" value="1" {% if k and k.alert %}checked{% endif %}> Alert</label>
+    <label class="check"><input type="checkbox" name="suppress" value="1" {% if k and k.suppress %}checked{% endif %}> Suppress</label>
+    {{ swatches(k.colour if k else '') }}
+    <div class="form-actions"><button class="primary">Save</button>
+    {% if k %}<a class="button" href="/capcodes#keywords">Cancel</a>{% endif %}</div>
   </form>
 </section>
 {% endblock %}
