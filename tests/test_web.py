@@ -230,3 +230,19 @@ def test_capcodes_admin_only(app):
     login(c, "viewer1", "a brand new password")
     assert c.get("/capcodes").status_code == 403
     assert "cap-link" not in c.get("/history").text
+
+
+def test_capcode_colour(app):
+    c = TestClient(app)
+    login(c, "alex")
+    token = csrf_of(c.get("/capcodes").text)
+    c.post("/config/alias", data={"csrf": token, "capcode": "5555", "label": "", "colour": "blue"})
+    conn = db.connect()
+    assert conn.execute("SELECT colour FROM aliases WHERE capcode='5555'").fetchone()[0] == "blue"
+    msgs = {m["capcode"]: m for m in c.get("/api/messages").json()["messages"]}
+    assert msgs["5555"]["colour"] == "blue"
+    assert "c-blue" in c.get("/history").text
+    # unknown colour names are dropped, never written into the page
+    c.post("/config/alias", data={"csrf": token, "capcode": "5555", "label": "x", "colour": "evil\"><script>"})
+    assert conn.execute("SELECT colour FROM aliases WHERE capcode='5555'").fetchone()[0] == ""
+    conn.close()

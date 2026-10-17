@@ -31,6 +31,10 @@ templates = Jinja2Templates(directory=BASE / "templates")
 limiter = auth.LoginLimiter()
 
 PAGE_SIZE = 100
+# Display colours for capcodes. Names map to CSS classes (c-<name>) with
+# separate light and dark shades, so every colour stays readable in both.
+COLOURS = ("red", "orange", "amber", "lime", "green", "teal",
+           "cyan", "blue", "indigo", "purple", "pink", "grey")
 ALLOWED_ARG_RE = re.compile(r"^[A-Za-z0-9 .:=_+,/-]*$")
 DEVICE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
 
@@ -153,7 +157,8 @@ def message_query(user: dict, f: dict) -> tuple[str, list]:
 
 
 MSG_SELECT = (
-    "SELECT m.*, a.label AS alias, COALESCE(a.suppress, 0) AS suppressed FROM messages m "
+    "SELECT m.*, a.label AS alias, COALESCE(a.suppress, 0) AS suppressed, "
+    "COALESCE(a.colour, '') AS colour FROM messages m "
     "LEFT JOIN aliases a ON a.capcode = m.capcode "
 )
 
@@ -558,14 +563,14 @@ def create_app() -> FastAPI:
             if edit.isdigit() and not e:
                 prefill = str(int(edit))
             return render(request, "capcodes.html", user, aliases=aliases, e=e,
-                          prefill=prefill, page_name="capcodes")
+                          prefill=prefill, colours=COLOURS, page_name="capcodes")
         finally:
             conn.close()
 
     @app.post("/config/alias")
     async def save_alias(request: Request, csrf: str = Form(""), capcode: str = Form(""),
                          label: str = Form(""), alert: str = Form(""),
-                         suppress: str = Form("")):
+                         suppress: str = Form(""), colour: str = Form("")):
         check_csrf(request, csrf)
         conn, user = require_user(request, admin=True)
         try:
@@ -574,22 +579,24 @@ def create_app() -> FastAPI:
             if not capcode.isdigit():
                 flash(request, "Enter a numeric capcode.", "error")
                 return back("/capcodes")
-            if not label and not suppress:
-                flash(request, "Give the capcode a label, or tick Suppress.", "error")
+            colour = colour if colour in COLOURS else ""
+            if not label and not suppress and not colour:
+                flash(request, "Give the capcode a label or colour, or tick Suppress.", "error")
                 return back("/capcodes")
             capcode = str(int(capcode))
             sup = 1 if suppress else 0
             al = 0 if sup else (1 if alert else 0)  # a suppressed capcode never alerts
             with db.transaction(conn):
                 conn.execute(
-                    "INSERT INTO aliases (capcode, label, alert, suppress) VALUES (?, ?, ?, ?) "
+                    "INSERT INTO aliases (capcode, label, alert, suppress, colour) VALUES (?, ?, ?, ?, ?) "
                     "ON CONFLICT(capcode) DO UPDATE SET label = excluded.label, "
-                    "alert = excluded.alert, suppress = excluded.suppress",
-                    (capcode, label, al, sup))
+                    "alert = excluded.alert, suppress = excluded.suppress, colour = excluded.colour",
+                    (capcode, label, al, sup, colour))
                 db.bump_config_version(conn)
                 db.audit(conn, user["username"], "alias_save",
                          f"{capcode} = {label or '(no label)'}"
-                         f"{' alert' if al else ''}{' suppressed' if sup else ''}")
+                         f"{' alert' if al else ''}{' suppressed' if sup else ''}"
+                         f"{' colour=' + colour if colour else ''}")
             flash(request, f"Saved {capcode}." + (" Its pages are now hidden on the Live screen." if sup else ""))
             return back("/capcodes")
         finally:

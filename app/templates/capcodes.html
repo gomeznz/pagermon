@@ -3,14 +3,14 @@
 {% block content %}
 <h1>Capcodes</h1>
 <section class="card" id="aliases">
-    <p class="muted">Label capcodes you know, such as your own test pagers. Tick <strong>Alert</strong> to send their pages to the webhook, or <strong>Suppress</strong> to hide a noisy capcode from the Live screen. Suppressed pages are still recorded and can be shown with <em>Show suppressed</em>.</p>
+    <p class="muted">Label capcodes you know, such as your own test pagers, and give them a <strong>colour</strong> to pick them out on the Live and History screens. Tick <strong>Alert</strong> to send their pages to the webhook, or <strong>Suppress</strong> to hide a noisy capcode from the Live screen. Suppressed pages are still recorded and can be shown with <em>Show suppressed</em>.</p>
   <div class="table-wrap">
     <table class="capcode-table">
       <thead><tr><th>Capcode</th><th>Label</th><th>Alert</th><th>Suppressed</th><th>Pages</th><th>Last seen</th><th></th></tr></thead>
       <tbody>
       {% for a in aliases %}
-        <tr{% if a.suppress %} class="suppressed-row"{% endif %}>
-          <td class="mono">{{ a.capcode }}</td><td>{{ a.label or '' }}</td>
+        <tr class="{% if a.suppress %}suppressed-row{% endif %}{% if a.colour %} c-{{ a.colour }}{% endif %}">
+          <td class="mono"><span class="swatch-dot" aria-hidden="true"></span>{{ a.capcode }}</td><td>{{ a.label or '' }}</td>
           <td>{% if a.alert %}<span class="tag ok">on</span>{% endif %}</td>
           <td>{% if a.suppress %}<span class="tag warn">suppressed</span>{% endif %}</td>
           <td class="mono">{{ a.pages }}</td>
@@ -40,8 +40,16 @@
     <input name="label" placeholder="Label (optional if suppressing)" maxlength="60" aria-label="Label" value="{{ e.label if e else '' }}">
     <label class="check"><input type="checkbox" name="alert" value="1" {% if e and e.alert %}checked{% endif %}> Alert</label>
     <label class="check"><input type="checkbox" name="suppress" value="1" {% if e and e.suppress %}checked{% endif %}> Suppress</label>
-    <button class="primary">Save</button>
-    {% if e %}<a class="button" href="/capcodes">Cancel</a>{% endif %}
+    <fieldset class="swatches">
+      <legend>Colour</legend>
+      {% set cur = e.colour if e else '' %}
+      <label class="swatch none" title="No colour"><input type="radio" name="colour" value="" {% if not cur %}checked{% endif %}><span>None</span></label>
+      {% for c in colours %}
+      <label class="swatch c-{{ c }}" title="{{ c|capitalize }}"><input type="radio" name="colour" value="{{ c }}" {% if cur == c %}checked{% endif %}><span class="visually-hidden">{{ c|capitalize }}</span></label>
+      {% endfor %}
+    </fieldset>
+    <div class="form-actions"><button class="primary">Save</button>
+    {% if e %}<a class="button" href="/capcodes">Cancel</a>{% endif %}</div>
   </form>
 </section>
 {% endblock %}

@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS aliases (
     capcode  TEXT NOT NULL UNIQUE,
     label    TEXT NOT NULL,
     alert    INTEGER NOT NULL DEFAULT 0,
-    suppress INTEGER NOT NULL DEFAULT 0
+    suppress INTEGER NOT NULL DEFAULT 0,
+    colour   TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -146,6 +147,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(aliases)")}
     if "suppress" not in cols:
         conn.execute("ALTER TABLE aliases ADD COLUMN suppress INTEGER NOT NULL DEFAULT 0")
+    if "colour" not in cols:
+        conn.execute("ALTER TABLE aliases ADD COLUMN colour TEXT NOT NULL DEFAULT ''")
 
 
 def get_setting(conn: sqlite3.Connection, key: str, default: str = "") -> str:

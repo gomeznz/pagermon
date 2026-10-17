@@ -20,7 +20,7 @@ RTL-SDR ─▶ rtl_fm ─▶ multimon-ng ─▶ decoder service ─▶ SQLite �
 - **Live feed** over WebSocket, with filtering, pause and channel status.
 - **History** with search by text, capcode or range, protocol, channel and date, plus CSV export.
 - **Config page** (admins): channels (frequency, dongle, gain, PPM, squelch, protocols), retention, de-duplication and alert webhook. Saving applies within a few seconds; nothing needs restarting by hand.
-- **Capcodes page** (admins): label capcodes, flag them for alerts, or suppress noisy ones, with page counts and last-seen times. Admins can click any capcode on the Live or History screens to jump straight to it.
+- **Capcodes page** (admins): label capcodes, give each a display colour, flag them for alerts, or suppress noisy ones, with page counts and last-seen times. Admins can click any capcode on the Live or History screens to jump straight to it.
 - **Access control**: argon2-hashed passwords, admin and viewer roles, and optional per-user capcode filters (e.g. `1234567, 2000000-2000099`). Includes login lockout after 5 failures, CSRF protection, and sign-out of other sessions on password change. An **audit log** records sign-ins, config changes, user changes and exports.
 - Runs as two hardened systemd services under an unprivileged `pager` user.
 

@@ -34,7 +34,8 @@
   }
 
   function row(m) {
-    const tr = el("tr", "type-" + m.msg_type + (m.suppressed ? " is-suppressed" : ""));
+    const tr = el("tr", "type-" + m.msg_type + (m.suppressed ? " is-suppressed" : "") +
+      (/^[a-z]+$/.test(m.colour || "") ? " c-" + m.colour : ""));
     tr.dataset.channel = m.channel_id;
     tr.dataset.suppressed = m.suppressed ? "1" : "0";
     tr.dataset.type = m.msg_type;
