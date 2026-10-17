@@ -246,3 +246,30 @@ def test_capcode_colour(app):
     c.post("/config/alias", data={"csrf": token, "capcode": "5555", "label": "x", "colour": "evil\"><script>"})
     assert conn.execute("SELECT colour FROM aliases WHERE capcode='5555'").fetchone()[0] == ""
     conn.close()
+
+
+def test_debug_console(app):
+    conn = db.connect()
+    conn.execute("DELETE FROM debug_log")
+    conn.executemany(
+        "INSERT INTO debug_log (ts, channel_id, channel_name, source, kind, text) VALUES (?,?,?,?,?,?)",
+        [(time.time(), 1, "Bench", "multimon", "parsed", "POCSAG1200: Address: 1  Function: 3  Alpha:   hi"),
+         (time.time(), 1, "Bench", "multimon", "unparsed", "FLEX|weird|line"),
+         (time.time(), 1, "Bench", "rtl_fm", "stderr", "Found 1 device(s)")])
+    c = TestClient(app)
+    login(c, "alex")
+    assert 'href="/debug" target="_blank"' in c.get("/config").text
+    assert c.get("/debug").status_code == 200
+    lines = c.get("/api/debug").json()["lines"]
+    assert [l["kind"] for l in lines] == ["parsed", "unparsed", "stderr"]
+    assert c.get("/api/debug", params={"after": lines[1]["id"]}).json()["lines"][0]["source"] == "rtl_fm"
+    assert "FLEX|weird|line" in c.get("/debug.txt").text
+    token = csrf_of(c.get("/debug").text)
+    assert c.post("/debug/clear", data={"csrf": "nope"}).status_code == 403
+    assert c.post("/debug/clear", data={"csrf": token}).status_code == 200
+    assert c.get("/api/debug").json()["lines"] == []
+    # viewers can't see it
+    v = TestClient(app)
+    login(v, "viewer1", "a brand new password")
+    assert v.get("/debug").status_code == 403 and v.get("/api/debug").status_code == 403
+    conn.close()

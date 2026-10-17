@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Debug console · MultipagePlus{% endblock %}
+{% block main_class %}page wide{% endblock %}
+{% block content %}
+<div class="debug-head">
+  <h1>Debug console</h1>
+  <div class="pill" id="dbg-pill"><span class="dot"></span>Connecting…</div>
+</div>
+<p class="muted small">Raw output from multimon-ng (and rtl_fm), newest at the bottom. The last 5,000 lines are kept.</p>
+
+<div class="toolbar debug-toolbar">
+  <input id="dbg-filter" type="search" placeholder="Filter text" aria-label="Filter lines">
+  <select id="dbg-channel" aria-label="Channel">
+    <option value="">All channels</option>
+    {% for c in channels %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+  </select>
+  <label class="check"><input type="checkbox" class="dbg-src" value="multimon" checked> multimon-ng</label>
+  <label class="check"><input type="checkbox" class="dbg-src" value="rtl_fm" checked> rtl_fm</label>
+  <label class="check"><input type="checkbox" class="dbg-src" value="decoder" checked> events</label>
+  <label class="check"><input type="checkbox" id="dbg-unparsed"> Unparsed only</label>
+  <button id="dbg-pause" type="button">Pause</button>
+  <button id="dbg-clear" type="button" data-csrf="{{ csrf }}">Clear</button>
+  <a class="button" href="/debug.txt">Download</a>
+</div>
+
+<div class="console" id="console" role="log" aria-live="off" tabindex="0"></div>
+<div class="debug-foot small muted">
+  <span id="dbg-count"></span>
+  <span class="legend"><span class="k-parsed">■ parsed</span> <span class="k-unparsed">■ not parsed</span> <span class="k-stderr">■ stderr</span> <span class="k-info">■ event</span> <span class="k-error">■ error</span></span>
+  <button id="dbg-bottom" type="button" class="small" hidden>Jump to latest ↓</button>
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/debug.js?v={{ version }}"></script>{% endblock %}

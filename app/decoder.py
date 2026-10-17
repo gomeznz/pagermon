@@ -33,6 +33,7 @@ from .parser import Page, parse_line
 log = logging.getLogger("pager.decoder")
 
 SAMPLE_RATE = 22050  # what multimon-ng expects for raw input
+DEBUG_KEEP = 5000  # raw lines kept for the debug console
 VALID_PROTOCOLS = ("POCSAG512", "POCSAG1200", "POCSAG2400", "FLEX", "FLEX_NEXT")
 
 
@@ -73,11 +74,13 @@ def build_commands(ch: dict) -> tuple[list[str], list[str]]:
 class ChannelRunner(threading.Thread):
     """Keeps one channel's receive pipeline running until stopped."""
 
-    def __init__(self, channel: dict, out: queue.Queue, status: queue.Queue):
+    def __init__(self, channel: dict, out: queue.Queue, status: queue.Queue,
+                 debug: queue.Queue | None = None):
         super().__init__(name=f"channel-{channel['id']}", daemon=True)
         self.ch = channel
         self.out = out
         self.status = status
+        self.debug = debug
         self.stop_event = threading.Event()
         self.procs: list[subprocess.Popen] = []
         self.stderr_tail: deque[str] = deque(maxlen=5)
@@ -85,6 +88,11 @@ class ChannelRunner(threading.Thread):
     def stop(self) -> None:
         self.stop_event.set()
         self._kill()
+
+    def _debug(self, source: str, kind: str, text: str) -> None:
+        """Record a raw line or event for the debug console."""
+        if self.debug is not None:
+            self.debug.put((time.time(), self.ch["id"], self.ch["name"], source, kind, text[:2000]))
 
     def _set_status(self, state: str, detail: str = "") -> None:
         self.status.put((self.ch["id"], state, detail))
@@ -119,6 +127,7 @@ class ChannelRunner(threading.Thread):
             except Exception as exc:  # keep the service alive no matter what
                 log.exception("channel %s crashed", self.ch["name"])
                 self._set_status("error", str(exc))
+                self._debug("decoder", "error", f"pipeline error: {exc}")
             finally:
                 self._kill()
             if self.stop_event.is_set():
@@ -127,6 +136,7 @@ class ChannelRunner(threading.Thread):
             backoff = 2.0 if time.time() - started > 60 else min(backoff * 2, 60)
             tail = " | ".join(self.stderr_tail)
             self._set_status("restarting", f"retry in {int(backoff)}s. {tail}".strip())
+            self._debug("decoder", "error", f"pipeline stopped; restarting in {int(backoff)}s")
             self.stop_event.wait(backoff)
         self._set_status("stopped")
 
@@ -134,6 +144,7 @@ class ChannelRunner(threading.Thread):
         rtl_cmd, mm_cmd = build_commands(self.ch)
         log.info("starting %s: %s | %s", self.ch["name"],
                  shlex.join(rtl_cmd), shlex.join(mm_cmd))
+        self._debug("decoder", "info", "start: " + shlex.join(rtl_cmd) + " | " + shlex.join(mm_cmd))
         rtl = subprocess.Popen(
             rtl_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             start_new_session=True,
@@ -141,14 +152,17 @@ class ChannelRunner(threading.Thread):
         self.procs.append(rtl)
         mm = subprocess.Popen(
             mm_cmd, stdin=rtl.stdout, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True, errors="replace",
+            stderr=subprocess.PIPE, text=True, errors="replace",
             bufsize=1, start_new_session=True,
         )
         self.procs.append(mm)
         rtl.stdout.close()  # multimon-ng owns the read end now
 
         threading.Thread(
-            target=self._drain_stderr, args=(rtl,), daemon=True
+            target=self._drain_stderr, args=(rtl, "rtl_fm"), daemon=True
+        ).start()
+        threading.Thread(
+            target=self._drain_stderr, args=(mm, "multimon"), daemon=True
         ).start()
         self._set_status("running", f"{self.ch['freq_hz'] / 1e6:.4f} MHz")
 
@@ -160,16 +174,22 @@ class ChannelRunner(threading.Thread):
         rc_rtl = rtl.poll()
         if not self.stop_event.is_set():
             log.warning("%s pipeline ended (rtl_fm rc=%s)", self.ch["name"], rc_rtl)
+            self._debug("decoder", "error",
+                        f"multimon-ng output ended (rtl_fm exit={rc_rtl}, multimon-ng exit={mm.poll()})")
 
-    def _drain_stderr(self, proc: subprocess.Popen) -> None:
+    def _drain_stderr(self, proc: subprocess.Popen, source: str) -> None:
         for raw in proc.stderr:
-            text = raw.decode("utf-8", "replace").strip()
+            text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+            text = text.strip()
             if text:
-                self.stderr_tail.append(text)
-                log.debug("[%s rtl_fm] %s", self.ch["name"], text)
+                if source == "rtl_fm":
+                    self.stderr_tail.append(text)
+                self._debug(source, "stderr", text)
+                log.debug("[%s %s] %s", self.ch["name"], source, text)
 
     def _run_simulated(self) -> None:
         self._set_status("running", f"SIMULATED from {settings.SIMULATE_FILE}")
+        self._debug("decoder", "info", f"simulation: replaying {settings.SIMULATE_FILE}")
         with open(settings.SIMULATE_FILE, encoding="utf-8") as fh:
             lines = [ln for ln in fh if ln.strip()]
         while not self.stop_event.is_set():
@@ -180,6 +200,10 @@ class ChannelRunner(threading.Thread):
 
     def _on_line(self, line: str) -> None:
         page = parse_line(line)
+        text = line.rstrip("\r\n")
+        if text:
+            # Every line multimon-ng prints, tagged with whether we could parse it.
+            self._debug("multimon", "parsed" if page else "unparsed", text)
         if page:
             self.out.put((self.ch, page, time.time()))
 
@@ -190,6 +214,8 @@ class Decoder:
         self.conn = db.connect()
         self.pages: queue.Queue = queue.Queue()
         self.status: queue.Queue = queue.Queue()
+        self.debug: queue.Queue = queue.Queue()
+        self.debug_since_prune = 0
         self.runners: dict[int, ChannelRunner] = {}
         self.config_version = ""
         self.aliases: dict[str, dict] = {}
@@ -218,7 +244,7 @@ class Decoder:
             self.status.get_nowait()
         self.conn.execute("DELETE FROM channel_status")
         for ch in channels:
-            runner = ChannelRunner(ch, self.pages, self.status)
+            runner = ChannelRunner(ch, self.pages, self.status, self.debug)
             self.runners[ch["id"]] = runner
             self.conn.execute(
                 "INSERT INTO channel_status (channel_id, state, started_at, updated_at) "
@@ -277,6 +303,25 @@ class Decoder:
             (state, detail[:500], time.time(), channel_id),
         )
 
+    def store_debug(self) -> None:
+        rows = []
+        while len(rows) < 1000:
+            try:
+                rows.append(self.debug.get_nowait())
+            except queue.Empty:
+                break
+        if not rows:
+            return
+        self.conn.executemany(
+            "INSERT INTO debug_log (ts, channel_id, channel_name, source, kind, text) "
+            "VALUES (?, ?, ?, ?, ?, ?)", rows)
+        self.debug_since_prune += len(rows)
+        if self.debug_since_prune >= 500:
+            self.debug_since_prune = 0
+            self.conn.execute(
+                "DELETE FROM debug_log WHERE id <= (SELECT MAX(id) FROM debug_log) - ?",
+                (DEBUG_KEEP,))
+
     def purge(self) -> None:
         days = int(db.get_setting(self.conn, "retention_days", "30") or 0)
         if days > 0:
@@ -304,6 +349,7 @@ class Decoder:
                 pass
             while not self.status.empty():
                 self.apply_status(*self.status.get_nowait())
+            self.store_debug()
 
             now = time.time()
             if now - last_check >= 2:
@@ -317,6 +363,7 @@ class Decoder:
         self.stop_runners()
         while not self.status.empty():
             self.apply_status(*self.status.get_nowait())
+        self.store_debug()
         db.set_setting(self.conn, "decoder_heartbeat", "0")
         log.info("decoder stopped")
 

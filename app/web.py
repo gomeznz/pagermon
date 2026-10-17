@@ -547,6 +547,59 @@ def create_app() -> FastAPI:
         finally:
             conn.close()
 
+    # --- debug console (admin) -------------------------------------------
+
+    @app.get("/debug", response_class=HTMLResponse)
+    async def debug_console(request: Request):
+        conn, user = require_user(request, admin=True)
+        try:
+            channels = conn.execute("SELECT id, name FROM channels ORDER BY name").fetchall()
+            return render(request, "debug.html", user, channels=channels, page_name="debug")
+        finally:
+            conn.close()
+
+    @app.get("/api/debug")
+    async def api_debug(request: Request, after: int = 0, limit: int = 500):
+        conn, user = require_user(request, admin=True)
+        try:
+            limit = max(1, min(limit, 2000))
+            if after:
+                rows = conn.execute("SELECT * FROM debug_log WHERE id > ? ORDER BY id LIMIT ?",
+                                    (after, limit)).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM debug_log ORDER BY id DESC LIMIT ?",
+                                    (limit,)).fetchall()[::-1]
+            hb = float(db.get_setting(conn, "decoder_heartbeat", "0") or 0)
+            return {"lines": [dict(r) for r in rows],
+                    "decoder": "up" if time.time() - hb < 15 else "down"}
+        finally:
+            conn.close()
+
+    @app.get("/debug.txt")
+    async def debug_download(request: Request):
+        conn, user = require_user(request, admin=True)
+        try:
+            rows = conn.execute("SELECT * FROM debug_log ORDER BY id").fetchall()
+            db.audit(conn, user["username"], "debug_download", f"{len(rows)} lines")
+        finally:
+            conn.close()
+        body = "\n".join(
+            f"{datetime.fromtimestamp(r['ts']):%Y-%m-%d %H:%M:%S.%f}"[:-3]
+            + f" [{r['channel_name']}] {r['source']}/{r['kind']}: {r['text']}" for r in rows) + "\n"
+        name = f"multipageplus-debug-{datetime.now():%Y%m%d-%H%M}.txt"
+        return PlainTextResponse(body, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.post("/debug/clear")
+    async def debug_clear(request: Request, csrf: str = Form("")):
+        check_csrf(request, csrf)
+        conn, user = require_user(request, admin=True)
+        try:
+            conn.execute("DELETE FROM debug_log")
+            db.audit(conn, user["username"], "debug_clear")
+            return JSONResponse({"ok": True})
+        finally:
+            conn.close()
+
     @app.get("/capcodes", response_class=HTMLResponse)
     async def capcodes(request: Request, edit: str = "", add: str = ""):
         conn, user = require_user(request, admin=True)

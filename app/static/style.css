@@ -45,6 +45,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
@@ -312,3 +313,38 @@ tr.suppressed-row td { color: var(--muted); }
 .swatch:has(input:focus-visible)::before, .swatch.none:has(input:focus-visible) span { outline: 2px solid var(--accent); outline-offset: 3px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 form.inline .form-actions { margin-left: auto; }
+
+/* Debug console */
+main.wide { max-width: 1600px; }
+.debug-head { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.debug-head h1 { margin: 0; }
+.debug-toolbar .button { min-height: 2.4rem; }
+.console {
+  --con-bg: #0d1117; --con-fg: #d6dde4; --con-dim: #7d8794;
+  background: var(--con-bg); color: var(--con-fg);
+  font: 0.82rem/1.5 var(--mono);
+  border-radius: var(--radius); border: 1px solid var(--line);
+  height: calc(100vh - 290px); min-height: 320px;
+  overflow: auto; padding: 0.5rem 0;
+}
+.console .ln { display: grid; grid-template-columns: 12.5ch 10ch 11.5ch 1fr; gap: 0 0.9em; padding: 0.05rem 0.9rem; border-left: 3px solid transparent; }
+.console .ln:hover { background: rgba(255, 255, 255, 0.04); }
+.console .t, .console .c, .console .s { color: var(--con-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.console .x { white-space: pre-wrap; word-break: break-all; }
+.console .ln.k-parsed .x { color: #7ee2a8; }
+.console .ln.k-unparsed { border-left-color: #f5b83d; background: rgba(245, 184, 61, 0.08); }
+.console .ln.k-unparsed .x { color: #f5c76a; }
+.console .ln.k-stderr .x { color: #9aa6b2; }
+.console .ln.k-info .x { color: #7cb8ff; }
+.console .ln.k-error { border-left-color: #ff6b6b; }
+.console .ln.k-error .x { color: #ff8a8a; }
+.debug-foot { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-top: 0.5rem; }
+.debug-foot .legend { display: inline-flex; gap: 0.8rem; flex-wrap: wrap; }
+.legend .k-parsed { color: #16a34a; } .legend .k-unparsed { color: #d97706; } .legend .k-stderr { color: #64748b; }
+.legend .k-info { color: #2563eb; } .legend .k-error { color: #dc2626; }
+#dbg-bottom { margin-left: auto; }
+@media (max-width: 680px) {
+  .console { height: 60vh; font-size: 0.75rem; }
+  .console .ln { grid-template-columns: 12.5ch 1fr; }
+  .console .c, .console .s { display: none; }
+}

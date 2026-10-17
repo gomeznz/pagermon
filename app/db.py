@@ -80,6 +80,16 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS debug_log (
+    id           INTEGER PRIMARY KEY,
+    ts           REAL NOT NULL,
+    channel_id   INTEGER,
+    channel_name TEXT NOT NULL DEFAULT '',
+    source       TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    text         TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS audit (
     id       INTEGER PRIMARY KEY,
     ts       REAL NOT NULL,
