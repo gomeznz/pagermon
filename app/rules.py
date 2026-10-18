@@ -138,8 +138,86 @@ def load_routes(conn: sqlite3.Connection) -> dict[tuple[str, int], list[tuple[in
 
 def kiosk_decision(kiosk_id: int, routes: dict, alias_id, keyword_ids, *, in_filter: bool,
                    forwarded_only: bool, suppressed: bool, alert: bool) -> tuple[bool, bool]:
-    """Return (show, alert) for one page on one kiosk."""
+    """Return (show, alert) for one page on one shared kiosk."""
     keys = ([("capcode", alias_id)] if alias_id else []) + [("keyword", k) for k in keyword_ids]
+    specific, everywhere = route_actions(routes, keys, kiosk_id)
+    return decide([specific, everywhere], in_filter=in_filter, forwarded_only=forwarded_only,
+                  suppressed=suppressed, alert=alert)
+
+
+# --- per-user view -------------------------------------------------------------
+#
+# Each user can add personal capcode and keyword rules that sit on top of the
+# shared ones and only change what *they* see (and their own kiosks):
+#   * label    — the personal label if set, else the shared one
+#   * colour   — personal colour (keyword first, then capcode), else shared colour
+#   * alert    — shared alert OR personal alert
+#   * suppress — shared or personal suppression, unless the page alerts
+# Shared kiosks and the shared webhook only ever use the shared rules.
+
+@dataclass
+class View:
+    shared: list
+    personal_caps: dict = field(default_factory=dict)   # capcode -> user_aliases row
+    personal: list = field(default_factory=list)        # compiled user_keywords
+
+
+@dataclass
+class Shown:
+    alert: bool
+    suppressed: bool
+    colour: str
+    label: str
+    keywords: list
+    spans: list
+    shared_keyword_ids: list
+    personal_keyword_ids: list
+    personal_alias_id: int | None
+    personal_alert: bool
+
+
+def load_view(conn: sqlite3.Connection, user_id: int | None = None) -> View:
+    shared = load_rules(conn)
+    if not user_id:
+        return View(shared)
+    caps = {r["capcode"]: dict(r) for r in
+            conn.execute("SELECT * FROM user_aliases WHERE user_id = ?", (user_id,))}
+    personal = [compile_rule(r) for r in
+                conn.execute("SELECT * FROM user_keywords WHERE user_id = ? ORDER BY id", (user_id,))]
+    return View(shared, caps, personal)
+
+
+def apply_view(message: str, capcode: str, view: View, cap_alert=0, cap_suppress=0,
+               cap_colour: str = "", cap_label: str = "") -> Shown:
+    s = evaluate(message, view.shared, cap_alert, cap_suppress, cap_colour)
+    pc = view.personal_caps.get(capcode) or {}
+    p = evaluate(message, view.personal, pc.get("alert", 0), pc.get("suppress", 0), pc.get("colour", ""))
+    alert = s.alert or p.alert
+    keywords = list(dict.fromkeys(s.keywords + p.keywords))
+    return Shown(
+        alert=alert,
+        suppressed=(s.suppressed or p.suppressed) and not alert,
+        colour=p.colour or s.colour,
+        label=pc.get("label") or cap_label or "",
+        keywords=keywords,
+        spans=_merge(s.spans + p.spans),
+        shared_keyword_ids=s.keyword_ids,
+        personal_keyword_ids=p.keyword_ids,
+        personal_alias_id=pc.get("id"),
+        personal_alert=p.alert,
+    )
+
+
+def load_user_routes(conn: sqlite3.Connection, user_id: int) -> dict:
+    routes: dict = {}
+    for r in conn.execute("SELECT rule_type, rule_id, kiosk_id, action FROM user_routes WHERE user_id = ?",
+                          (user_id,)):
+        routes.setdefault((r["rule_type"], r["rule_id"]), []).append((r["kiosk_id"], r["action"]))
+    return routes
+
+
+def route_actions(routes: dict, keys, kiosk_id: int) -> tuple[set, set]:
+    """Actions from these rules aimed at this kiosk, and at "all kiosks" (id 0)."""
     specific, everywhere = set(), set()
     for key in keys:
         for kid, action in routes.get(key, ()):
@@ -147,11 +225,17 @@ def kiosk_decision(kiosk_id: int, routes: dict, alias_id, keyword_ids, *, in_fil
                 specific.add(action)
             elif kid == 0:
                 everywhere.add(action)
-    actions = specific or everywhere
-    if "alert" in actions:
-        return True, True
-    if "suppress" in actions:
-        return False, False
-    if "forward" in actions:
-        return True, alert
+    return specific, everywhere
+
+
+def decide(levels, *, in_filter: bool, forwarded_only: bool, suppressed: bool,
+           alert: bool) -> tuple[bool, bool]:
+    """(show, alert) from action sets in priority order; the first non-empty set wins."""
+    for actions in levels:
+        if actions:
+            if "alert" in actions:
+                return True, True
+            if "suppress" in actions:
+                return False, False
+            return True, alert  # forward
     return (in_filter and not suppressed and not forwarded_only), alert

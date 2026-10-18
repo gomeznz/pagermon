@@ -229,7 +229,8 @@ def test_capcodes_admin_only(app):
     c = TestClient(app)
     login(c, "viewer1", "a brand new password")
     assert c.get("/capcodes").status_code == 403
-    assert "cap-link" not in c.get("/history").text
+    hist = c.get("/history").text
+    assert 'href="/my?edit=' in hist and 'href="/capcodes?edit=' not in hist
 
 
 def test_capcode_colour(app):
@@ -402,4 +403,134 @@ def test_kiosk_routing(app):
     c.post(f"/config/kiosk/{board['id']}/edit", data={"csrf": token, "name": "Board 2", "mode": "all", "theme": "light"})
     b2 = conn.execute("SELECT * FROM kiosks WHERE id=?", (board["id"],)).fetchone()
     assert (b2["name"], b2["mode"], b2["theme"]) == ("Board 2", "all", "light")
+    conn.close()
+
+
+def _reset_personal(conn):
+    for tbl in ("user_aliases", "user_keywords", "user_routes", "kiosks", "kiosk_routes", "keywords"):
+        conn.execute(f"DELETE FROM {tbl}")
+    conn.execute("DELETE FROM aliases WHERE capcode IN ('1500', '5555', '9999')")
+
+
+def test_personal_filters_only_affect_owner(app):
+    conn = db.connect()
+    _reset_personal(conn)
+    v = TestClient(app)
+    login(v, "viewer1", "a brand new password")      # filter: 1000-1999, 5555
+    page = v.get("/my")
+    assert page.status_code == 200 and "My capcodes" in page.text
+    token = csrf_of(page.text)
+    # outside the user's filter is refused
+    v.post("/my/capcode", data={"csrf": token, "capcode": "9999", "label": "nope"})
+    assert conn.execute("SELECT COUNT(*) FROM user_aliases").fetchone()[0] == 0
+    v.post("/my/capcode", data={"csrf": token, "capcode": "1500", "label": "My bench", "colour": "purple"})
+    v.post("/my/capcode", data={"csrf": token, "capcode": "5555", "suppress": "1"})
+    v.post("/my/keyword", data={"csrf": token, "keyword": "range", "alert": "1", "colour": "red"})
+    mine = {m["capcode"]: m for m in v.get("/api/messages").json()["messages"]}
+    assert mine["1500"]["alias"] == "My bench"
+    assert mine["1500"]["alert"] == 1 and mine["1500"]["colour"] == "red"   # keyword colour beats capcode colour
+    assert [x[2] for x in mine["1500"]["spans"]] == ["red"]
+    assert mine["5555"]["suppressed"] == 1
+    # the admin's view is unchanged
+    a = TestClient(app)
+    login(a, "alex")
+    theirs = {m["capcode"]: m for m in a.get("/api/messages").json()["messages"]}
+    assert theirs["1500"]["alias"] in (None, "") and theirs["1500"]["alert"] == 0
+    assert theirs["5555"]["suppressed"] == 0
+    # edit / toggle / delete only work on your own rules
+    rid = conn.execute("SELECT id FROM user_aliases WHERE capcode='5555'").fetchone()[0]
+    atok = csrf_of(a.get("/my").text)
+    a.post(f"/my/capcode/{rid}/delete", data={"csrf": atok})               # not alex's rule
+    assert conn.execute("SELECT COUNT(*) FROM user_aliases WHERE id=?", (rid,)).fetchone()[0] == 1
+    v.post(f"/my/capcode/{rid}/suppress", data={"csrf": token})
+    assert conn.execute("SELECT suppress FROM user_aliases WHERE id=?", (rid,)).fetchone()[0] == 0
+    v.post(f"/my/capcode/{rid}/delete", data={"csrf": token})
+    assert conn.execute("SELECT COUNT(*) FROM user_aliases WHERE id=?", (rid,)).fetchone()[0] == 0
+    conn.close()
+
+
+def test_rule_edits_do_not_restart_radio(app):
+    conn = db.connect()
+    cv, rv = db.get_setting(conn, "config_version"), int(db.get_setting(conn, "rules_version"))
+    a = TestClient(app)
+    login(a, "alex")
+    tok = csrf_of(a.get("/capcodes").text)
+    a.post("/config/alias", data={"csrf": tok, "capcode": "4321", "label": "x"})
+    a.post("/my/keyword", data={"csrf": tok, "keyword": "zebra", "colour": "blue"})
+    assert db.get_setting(conn, "config_version") == cv
+    assert int(db.get_setting(conn, "rules_version")) == rv + 2
+    conn.close()
+
+
+def test_personal_kiosks(app):
+    conn = db.connect()
+    _reset_personal(conn)
+    vid = conn.execute("SELECT id FROM users WHERE username='viewer1'").fetchone()[0]
+    conn.execute("UPDATE users SET max_kiosks = 1 WHERE id = ?", (vid,))
+    v = TestClient(app)
+    login(v, "viewer1", "a brand new password")
+    token = csrf_of(v.get("/my").text)
+    v.post("/my/kiosk", data={"csrf": token, "name": "Desk", "mode": "forwarded"})
+    v.post("/my/kiosk", data={"csrf": token, "name": "Second"})            # over the limit
+    ks = conn.execute("SELECT * FROM kiosks WHERE owner_id = ?", (vid,)).fetchall()
+    assert [k["name"] for k in ks] == ["Desk"]
+    desk = ks[0]
+    # forward 1500 and (try to) 9999 to the kiosk — 9999 is outside viewer1's filter
+    v.post("/my/capcode", data={"csrf": token, "capcode": "1500", "label": "Mine",
+                                f"kiosk_{desk['id']}": "forward"})
+    v.post("/my/keyword", data={"csrf": token, "keyword": "hidden", "kiosk_0": "alert"})
+    anon = TestClient(app)
+    with anon.websocket_connect(f"/kiosk/{desk['token']}/ws", headers={"origin": "http://testserver"}) as ws:
+        msgs = ws.receive_json()["messages"]
+    caps = {m["capcode"]: m for m in msgs}
+    assert "1500" in caps and caps["1500"]["alias"] == "Mine"
+    assert "9999" not in caps            # "hidden from viewer" matches the keyword but is outside the owner's filter
+    # shared kiosk lists don't include personal kiosks; admin sees them separately
+    a = TestClient(app)
+    login(a, "alex")
+    cfg = a.get("/config").text
+    assert "Users' personal kiosks" in cfg and "Desk" in cfg
+    assert f'name="kiosk_{desk["id"]}"' not in a.get("/capcodes").text
+    # disabling the owner cuts the kiosk off
+    conn.execute("UPDATE users SET active = 0 WHERE id = ?", (vid,))
+    assert anon.get(f"/kiosk/{desk['token']}").status_code == 404
+    conn.execute("UPDATE users SET active = 1 WHERE id = ?", (vid,))
+    assert anon.get(f"/kiosk/{desk['token']}").status_code == 200
+    # someone else can't manage it
+    atok = csrf_of(cfg)
+    a.post(f"/my/kiosk/{desk['id']}/delete", data={"csrf": atok})
+    assert conn.execute("SELECT COUNT(*) FROM kiosks WHERE id=?", (desk["id"],)).fetchone()[0] == 1
+    # admin's max-kiosks control
+    a.post(f"/users/{vid}/update", data={"csrf": atok, "role": "viewer", "active": "1",
+                                         "capcode_filter": "1000-1999, 5555", "max_kiosks": "0"})
+    assert conn.execute("SELECT max_kiosks FROM users WHERE id=?", (vid,)).fetchone()[0] == 0
+    conn.close()
+
+
+def test_personal_alert_webhook(app, tmp_path):
+    from app.decoder import Decoder
+    from app.parser import parse_line
+    conn = db.connect()
+    _reset_personal(conn)
+    vid = conn.execute("SELECT id FROM users WHERE username='viewer1'").fetchone()[0]
+    conn.execute("UPDATE users SET notify_url = 'http://hook.invalid/me' WHERE id = ?", (vid,))
+    conn.execute("INSERT INTO user_keywords (user_id, keyword, alert) VALUES (?, 'boiler', 1)", (vid,))
+    sent = []
+    import app.decoder as dec
+    orig = dec.send_webhook
+    dec.send_webhook = lambda url, payload: sent.append((url, payload))
+    try:
+        d = Decoder.__new__(Decoder)
+        d.conn = conn
+        d.dedupe_seconds = 0
+        d.recent = {}
+        d.load_rules()
+        ch = {"id": 1, "name": "Bench", "freq_hz": 157450000}
+        d.store(ch, parse_line("POCSAG1200: Address: 1500  Function: 3  Alpha:   BOILER fault"), time.time())
+        d.store(ch, parse_line("POCSAG1200: Address: 9999  Function: 3  Alpha:   boiler outside filter"), time.time())
+        time.sleep(0.3)
+    finally:
+        dec.send_webhook = orig
+        conn.execute("UPDATE users SET notify_url = '' WHERE id = ?", (vid,))
+    assert [p["capcode"] for u, p in sent] == ["1500"] and sent[0][1]["user"] == "viewer1"
     conn.close()

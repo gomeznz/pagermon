@@ -508,3 +508,6 @@ body.login-page main, body.login-page .foot { position: relative; z-index: 1; }
   .lbg-tx .ring:first-child { opacity: 0.25; transform: scale(0.35); }
   .lbg-tx .ring:nth-child(2) { opacity: 0.15; transform: scale(0.6); }
 }
+
+.shared-label { display: block; }
+#notify-wrap.muted { opacity: 0.6; }

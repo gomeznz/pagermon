@@ -4,7 +4,7 @@
   const MAX_ROWS = 500;
   const table = document.getElementById("messages");
   const tbody = table.querySelector("tbody");
-  const isAdmin = table.dataset.admin === "1";
+  const capLink = table.dataset.caplink || "/my";
   const empty = document.getElementById("empty");
   const filter = document.getElementById("filter");
   const chFilter = document.getElementById("channel-filter");
@@ -60,14 +60,10 @@
     if (m.function) p.appendChild(el("span", "fn", m.function));
     tr.appendChild(p);
     const c = el("td", "cap");
-    if (isAdmin) {
-      const a = el("a", "cap-link", m.capcode);
-      a.href = "/capcodes?edit=" + encodeURIComponent(m.capcode) + "#capcode-form";
-      a.title = "Label, alert or suppress";
-      c.appendChild(a);
-    } else {
-      c.appendChild(document.createTextNode(m.capcode));
-    }
+    const a = el("a", "cap-link", m.capcode);
+    a.href = capLink + "?edit=" + encodeURIComponent(m.capcode) + "#capcode-form";
+    a.title = "Label, alert or suppress";
+    c.appendChild(a);
     if (m.alias) c.appendChild(el("span", "alias", m.alias));
     if (m.alert) c.appendChild(el("span", "tag alert-tag", "alert"));
     if (m.suppressed) c.appendChild(el("span", "tag warn sup-tag", "suppressed"));
@@ -108,12 +104,43 @@
     count.textContent = parts.join(" · ");
   }
 
+  // Browser pop-ups for alert pages while the tab is in the background.
+  // Notifications need a secure page (HTTPS, e.g. via Cloudflare, or localhost).
+  const notifyBox = document.getElementById("notify");
+  const notifyWrap = document.getElementById("notify-wrap");
+  const canNotify = "Notification" in window && window.isSecureContext;
+  if (!canNotify) {
+    notifyBox.disabled = true;
+    notifyWrap.title = "Browser notifications need the page to be opened over HTTPS.";
+    notifyWrap.classList.add("muted");
+  } else {
+    try { notifyBox.checked = localStorage.getItem("pm.notify") === "1" && Notification.permission === "granted"; } catch (e) { /* ignore */ }
+  }
+  notifyBox.addEventListener("change", async function () {
+    if (notifyBox.checked && Notification.permission !== "granted") {
+      const p = await Notification.requestPermission();
+      if (p !== "granted") notifyBox.checked = false;
+    }
+    try { localStorage.setItem("pm.notify", notifyBox.checked ? "1" : "0"); } catch (e) { /* ignore */ }
+  });
+  function notifyAlert(m) {
+    if (!canNotify || !notifyBox.checked || Notification.permission !== "granted") return;
+    if (document.visibilityState === "visible" && document.hasFocus()) return;
+    try {
+      const n = new Notification((m.alias || m.capcode) + " · MultipagePlus", {
+        body: m.message || "(" + m.msg_type + ")", tag: "mpp-" + m.id, icon: "/static/icon.svg"
+      });
+      n.onclick = function () { window.focus(); n.close(); };
+    } catch (e) { /* some browsers only allow notifications from a service worker */ }
+  }
+
   function add(messages, fresh) {
     for (const m of messages) {
       if (seen.has(m.id)) continue;
       seen.add(m.id);
       const tr = row(m);
       if (fresh) tr.classList.add("new");
+      if (fresh && m.alert && !m.suppressed) notifyAlert(m);
       tbody.insertBefore(tr, tbody.firstChild);
     }
     while (tbody.rows.length > MAX_ROWS) {

@@ -1,36 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Capcodes · MultipagePlus{% endblock %}
-{% macro swatches(cur) %}
-    <fieldset class="swatches">
-      <legend>Colour</legend>
-      <label class="swatch none" title="No colour"><input type="radio" name="colour" value="" {% if not cur %}checked{% endif %}><span>None</span></label>
-      {% for c in colours %}
-      <label class="swatch c-{{ c }}" title="{{ c|capitalize }}"><input type="radio" name="colour" value="{{ c }}" {% if cur == c %}checked{% endif %}><span class="visually-hidden">{{ c|capitalize }}</span></label>
-      {% endfor %}
-    </fieldset>
-{% endmacro %}
-{% macro kiosk_routes(current) %}
-    <fieldset class="kiosk-routes">
-      <legend>Kiosks</legend>
-      {% if kiosks %}
-      <div class="kr-grid" role="table" aria-label="Kiosk settings">
-        <div class="kr-row kr-headrow" role="row"><span role="columnheader">Kiosk</span><span role="columnheader">Default</span><span role="columnheader">Forward</span><span role="columnheader">Alert</span><span role="columnheader">Suppress</span></div>
-        {% for kid, kname in kiosk_opts %}
-        <div class="kr-row{% if kid == 0 %} kr-all{% endif %}" role="row">
-          <span class="kr-name" role="cell">{{ kname }}</span>
-          {% for act in ['', 'forward', 'alert', 'suppress'] %}
-          <label class="kr-opt" role="cell"><input type="radio" name="kiosk_{{ kid }}" value="{{ act }}" {% if current.get(kid, '') == act %}checked{% endif %}><span class="visually-hidden">{{ act or 'default' }} for {{ kname }}</span></label>
-          {% endfor %}
-        </div>
-        {% endfor %}
-      </div>
-      <small class="muted">A setting for a named kiosk beats &ldquo;All kiosks&rdquo;. <strong>Forward</strong> shows the page even if that kiosk wouldn't normally show it; <strong>Alert</strong> forwards it as an alert; <strong>Suppress</strong> hides it there.</small>
-      {% else %}
-      <small class="muted">No kiosks yet. Create one under <a href="/config#kiosks">Config &rarr; Kiosk displays</a> to forward pages to it.</small>
-      {% endif %}
-    </fieldset>
-{% endmacro %}
-{% macro route_chips(list) %}{% for r in list %}<span class="route-chip r-{{ r.action }}">{{ {'forward': '→', 'alert': '!', 'suppress': '⊘'}[r.action] }} {{ r.kiosk }}</span>{% endfor %}{% endmacro %}
+{% import "_macros.html" as mx %}
 {% block content %}
 <h1>Capcodes</h1>
 <section class="card" id="aliases">
@@ -46,7 +16,7 @@
           <td>{% if a.suppress %}<span class="tag warn">suppressed</span>{% endif %}</td>
           <td class="mono">{{ a.pages }}</td>
           <td class="time small">{{ a.last_seen|ts if a.last_seen else '—' }}</td>
-          <td class="routes-cell">{{ route_chips(routes.get(('capcode', a.id), [])) }}</td>
+          <td class="routes-cell">{{ mx.route_chips(routes.get(('capcode', a.id), [])) }}</td>
           <td class="actions">
             <a class="button small" href="/capcodes?edit={{ a.capcode }}#capcode-form">Edit</a>
             <form method="post" action="/config/alias/{{ a.id }}/suppress">
@@ -72,8 +42,8 @@
     <input name="label" placeholder="Label (optional if suppressing)" maxlength="60" aria-label="Label" value="{{ e.label if e else '' }}">
     <label class="check"><input type="checkbox" name="alert" value="1" {% if e and e.alert %}checked{% endif %}> Alert</label>
     <label class="check"><input type="checkbox" name="suppress" value="1" {% if e and e.suppress %}checked{% endif %}> Suppress</label>
-    {{ swatches(e.colour if e else '') }}
-    {{ kiosk_routes(e_routes) }}
+    {{ mx.swatches(e.colour if e else '', colours) }}
+    {{ mx.kiosk_routes(e_routes, kiosk_opts, 'shared') }}
     <div class="form-actions"><button class="primary">Save</button>
     {% if e %}<a class="button" href="/capcodes">Cancel</a>{% endif %}</div>
   </form>
@@ -92,7 +62,7 @@
           <td class="small">{{ 'whole word' if w.match == 'word' else 'anywhere' }}</td>
           <td>{% if w.alert %}<span class="tag ok">on</span>{% endif %}</td>
           <td>{% if w.suppress %}<span class="tag warn">suppressed</span>{% endif %}</td>
-          <td class="routes-cell">{{ route_chips(routes.get(('keyword', w.id), [])) }}</td>
+          <td class="routes-cell">{{ mx.route_chips(routes.get(('keyword', w.id), [])) }}</td>
           <td class="actions">
             <a class="button small" href="/capcodes?kw={{ w.id }}#keyword-form">Edit</a>
             <form method="post" action="/config/keyword/{{ w.id }}/suppress">
@@ -122,8 +92,8 @@
     </select>
     <label class="check"><input type="checkbox" name="alert" value="1" {% if k and k.alert %}checked{% endif %}> Alert</label>
     <label class="check"><input type="checkbox" name="suppress" value="1" {% if k and k.suppress %}checked{% endif %}> Suppress</label>
-    {{ swatches(k.colour if k else '') }}
-    {{ kiosk_routes(k_routes) }}
+    {{ mx.swatches(k.colour if k else '', colours) }}
+    {{ mx.kiosk_routes(k_routes, kiosk_opts, 'shared') }}
     <div class="form-actions"><button class="primary">Save</button>
     {% if k %}<a class="button" href="/capcodes#keywords">Cancel</a>{% endif %}</div>
   </form>

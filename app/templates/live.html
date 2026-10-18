@@ -14,12 +14,13 @@
   </select>
   <label class="check"><input type="checkbox" id="hide-tone"> Hide tone-only</label>
   <label class="check"><input type="checkbox" id="show-suppressed"> Show suppressed</label>
+  <label class="check" id="notify-wrap" title="Pop-up notifications for alert pages while this tab is in the background"><input type="checkbox" id="notify"> Notify me</label>
   <button id="pause" type="button">Pause</button>
   <span class="count" id="count"></span>
 </div>
 
 <div class="table-wrap">
-  <table class="messages" id="messages" data-admin="{{ 1 if user.role == 'admin' else 0 }}">
+  <table class="messages" id="messages" data-caplink="{{ '/capcodes' if user.role == 'admin' else '/my' }}">
     <thead>
       <tr><th>Time</th><th>Channel</th><th>Proto</th><th>Capcode</th><th>Message</th></tr>
     </thead>

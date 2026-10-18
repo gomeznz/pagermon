@@ -93,6 +93,39 @@ CREATE TABLE IF NOT EXISTS kiosks (
     last_seen      REAL
 );
 
+CREATE TABLE IF NOT EXISTS user_aliases (
+    id       INTEGER PRIMARY KEY,
+    user_id  INTEGER NOT NULL,
+    capcode  TEXT NOT NULL,
+    label    TEXT NOT NULL DEFAULT '',
+    alert    INTEGER NOT NULL DEFAULT 0,
+    suppress INTEGER NOT NULL DEFAULT 0,
+    colour   TEXT NOT NULL DEFAULT '',
+    UNIQUE (user_id, capcode)
+);
+
+CREATE TABLE IF NOT EXISTS user_keywords (
+    id       INTEGER PRIMARY KEY,
+    user_id  INTEGER NOT NULL,
+    keyword  TEXT NOT NULL COLLATE NOCASE,
+    match    TEXT NOT NULL DEFAULT 'word' CHECK (match IN ('word', 'contains')),
+    alert    INTEGER NOT NULL DEFAULT 0,
+    suppress INTEGER NOT NULL DEFAULT 0,
+    colour   TEXT NOT NULL DEFAULT '',
+    UNIQUE (user_id, keyword)
+);
+
+-- Personal kiosk routing: a user's own rules to their own kiosks (kiosk_id 0 = all of theirs).
+CREATE TABLE IF NOT EXISTS user_routes (
+    id        INTEGER PRIMARY KEY,
+    user_id   INTEGER NOT NULL,
+    rule_type TEXT NOT NULL CHECK (rule_type IN ('capcode', 'keyword')),
+    rule_id   INTEGER NOT NULL,
+    kiosk_id  INTEGER NOT NULL,
+    action    TEXT NOT NULL CHECK (action IN ('forward', 'alert', 'suppress')),
+    UNIQUE (rule_type, rule_id, kiosk_id)
+);
+
 CREATE TABLE IF NOT EXISTS kiosk_routes (
     id        INTEGER PRIMARY KEY,
     rule_type TEXT NOT NULL CHECK (rule_type IN ('capcode', 'keyword')),
@@ -136,6 +169,7 @@ DEFAULT_SETTINGS = {
     "dedupe_seconds": "0",
     "webhook_url": "",
     "config_version": "1",
+    "rules_version": "1",
     "decoder_heartbeat": "0",
 }
 
@@ -191,6 +225,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
     kcols = {r["name"] for r in conn.execute("PRAGMA table_info(kiosks)")}
     if kcols and "mode" not in kcols:
         conn.execute("ALTER TABLE kiosks ADD COLUMN mode TEXT NOT NULL DEFAULT 'all'")
+    if kcols and "owner_id" not in kcols:  # NULL = shared kiosk managed by admins
+        conn.execute("ALTER TABLE kiosks ADD COLUMN owner_id INTEGER")
+    ucols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+    if ucols and "max_kiosks" not in ucols:
+        conn.execute("ALTER TABLE users ADD COLUMN max_kiosks INTEGER NOT NULL DEFAULT 3")
+    if ucols and "notify_url" not in ucols:
+        conn.execute("ALTER TABLE users ADD COLUMN notify_url TEXT NOT NULL DEFAULT ''")
     if "colour" not in cols:
         conn.execute("ALTER TABLE aliases ADD COLUMN colour TEXT NOT NULL DEFAULT ''")
 
@@ -205,6 +246,16 @@ def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
         "INSERT INTO settings (key, value) VALUES (?, ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         (key, str(value)),
+    )
+
+
+def bump_rules_version(conn: sqlite3.Connection) -> None:
+    """Tell the decoder that capcode/keyword rules or alert settings changed.
+
+    Unlike bump_config_version this does not restart the radio pipelines.
+    """
+    conn.execute(
+        "UPDATE settings SET value = CAST(value AS INTEGER) + 1 WHERE key = 'rules_version'"
     )
 
 

@@ -1,0 +1,57 @@
+{# Form pieces shared by the Capcodes (shared rules) and My filters (personal rules) pages. #}
+{% macro swatches(cur, colours) %}
+    <fieldset class="swatches">
+      <legend>Colour</legend>
+      <label class="swatch none" title="No colour"><input type="radio" name="colour" value="" {% if not cur %}checked{% endif %}><span>None</span></label>
+      {% for c in colours %}
+      <label class="swatch c-{{ c }}" title="{{ c|capitalize }}"><input type="radio" name="colour" value="{{ c }}" {% if cur == c %}checked{% endif %}><span class="visually-hidden">{{ c|capitalize }}</span></label>
+      {% endfor %}
+    </fieldset>
+{% endmacro %}
+
+{% macro kiosk_routes(current, opts, scope) %}
+    <fieldset class="kiosk-routes">
+      <legend>{{ 'My kiosks' if scope == 'personal' else 'Kiosks' }}</legend>
+      {% if opts|length > 1 %}
+      <div class="kr-grid" role="table" aria-label="Kiosk settings">
+        <div class="kr-row kr-headrow" role="row"><span role="columnheader">Kiosk</span><span role="columnheader">Default</span><span role="columnheader">Forward</span><span role="columnheader">Alert</span><span role="columnheader">Suppress</span></div>
+        {% for kid, kname in opts %}
+        <div class="kr-row{% if kid == 0 %} kr-all{% endif %}" role="row">
+          <span class="kr-name" role="cell">{{ kname }}</span>
+          {% for act in ['', 'forward', 'alert', 'suppress'] %}
+          <label class="kr-opt" role="cell"><input type="radio" name="kiosk_{{ kid }}" value="{{ act }}" {% if current.get(kid, '') == act %}checked{% endif %}><span class="visually-hidden">{{ act or 'default' }} for {{ kname }}</span></label>
+          {% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+      <small class="muted">A setting for a named kiosk beats &ldquo;{{ opts[0][1] }}&rdquo;. <strong>Forward</strong> shows the page even if that kiosk wouldn't normally show it; <strong>Alert</strong> forwards it as an alert; <strong>Suppress</strong> hides it there.</small>
+      {% elif scope == 'personal' %}
+      <small class="muted">Create a kiosk under <a href="#my-kiosks">My kiosks</a> to forward pages to it.</small>
+      {% else %}
+      <small class="muted">No kiosks yet. Create one under <a href="/config#kiosks">Config &rarr; Kiosk displays</a> to forward pages to it.</small>
+      {% endif %}
+    </fieldset>
+{% endmacro %}
+
+{% macro route_chips(list) %}{% for r in list %}<span class="route-chip r-{{ r.action }}">{{ {'forward': '→', 'alert': '!', 'suppress': '⊘'}[r.action] }} {{ r.kiosk }}</span>{% endfor %}{% endmacro %}
+
+{% macro kiosk_settings(kk, action, csrf, submit='Save kiosk', show_name=True) %}
+        <form method="post" action="{{ action }}" class="grid">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          {% if show_name %}<label>Name <input name="name" required maxlength="40" value="{{ kk.name if kk else '' }}" placeholder="Workshop screen"></label>{% endif %}
+          <label>Show
+            <select name="mode">
+              <option value="all" {% if not kk or kk.mode != 'forwarded' %}selected{% endif %}>All pages (within the capcode filter)</option>
+              <option value="forwarded" {% if kk and kk.mode == 'forwarded' %}selected{% endif %}>Only pages forwarded to it</option>
+            </select>
+          </label>
+          <label>Capcode filter <input name="capcode_filter" value="{{ kk.capcode_filter if kk else '' }}" placeholder="all"></label>
+          <label>Theme
+            <select name="theme">
+              {% for t, tl in [('dark', 'Dark'), ('light', 'Light'), ('auto', "Follow the screen's setting")] %}<option value="{{ t }}" {% if kk and kk.theme == t %}selected{% endif %}>{{ tl }}</option>{% endfor %}
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" name="hide_tone" value="1" {% if kk and kk.hide_tone %}checked{% endif %}> Hide tone-only pages</label>
+          <div class="span2 form-actions"><button class="primary">{{ submit }}</button></div>
+        </form>
+{% endmacro %}

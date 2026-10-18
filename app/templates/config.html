@@ -143,6 +143,31 @@
   </form>
 </section>
 
+{% if personal_kiosks %}
+<section class="card" id="personal-kiosks">
+  <h2>Users' personal kiosks</h2>
+  <p class="muted">Kiosks people have made for themselves under My filters. Each one only ever shows what its owner can see, and stops working if the owner is disabled or removed.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Owner</th><th>Kiosk</th><th>State</th><th>Last viewed</th><th></th></tr></thead>
+      <tbody>
+      {% for pk in personal_kiosks %}
+        <tr>
+          <td>{{ pk.owner }}</td><td>{{ pk.name }}</td>
+          <td>{% if pk.active %}<span class="tag ok">enabled</span>{% else %}<span class="tag">disabled</span>{% endif %}</td>
+          <td class="time small">{{ pk.last_seen|ts if pk.last_seen else 'never' }}</td>
+          <td class="actions">
+            <form method="post" action="/config/kiosk/{{ pk.id }}/toggle"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">{% if pk.active %}Disable{% else %}Enable{% endif %}</button></form>
+            <form method="post" action="/config/kiosk/{{ pk.id }}/delete" class="confirm" data-confirm="Remove {{ pk.owner }}'s kiosk {{ pk.name }}?"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Remove</button></form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
 <section class="card" id="debug">
   <h2>Debug console</h2>
   <p class="muted">Watch the raw lines multimon-ng sends to MultipagePlus as they arrive, plus rtl_fm and multimon-ng error output and pipeline start/stop events. Lines MultipagePlus couldn't parse are highlighted, which is the quickest way to check a new transmitter or a multimon-ng upgrade.</p>

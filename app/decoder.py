@@ -28,7 +28,7 @@ import urllib.request
 from collections import deque
 
 from . import db, settings
-from . import rules as kwrules
+from . import auth, rules as kwrules
 from .parser import Page, parse_line
 
 log = logging.getLogger("pager.decoder")
@@ -221,6 +221,8 @@ class Decoder:
         self.config_version = ""
         self.aliases: dict[str, dict] = {}
         self.keyword_rules: list = []
+        self.personal: list = []
+        self.rules_version = ""
         self.dedupe_seconds = 0
         self.webhook_url = ""
         self.recent: dict[tuple[str, str], float] = {}
@@ -228,8 +230,9 @@ class Decoder:
         self.last_purge = 0.0
 
     # --- configuration -------------------------------------------------
-    def load_config(self) -> None:
-        self.config_version = db.get_setting(self.conn, "config_version")
+    def load_rules(self) -> None:
+        """Capcode/keyword rules and alert settings. Reloading these never touches the radio."""
+        self.rules_version = db.get_setting(self.conn, "rules_version")
         self.dedupe_seconds = int(db.get_setting(self.conn, "dedupe_seconds", "0") or 0)
         self.webhook_url = db.get_setting(self.conn, "webhook_url").strip()
         self.aliases = {
@@ -237,6 +240,16 @@ class Decoder:
             for r in self.conn.execute("SELECT * FROM aliases")
         }
         self.keyword_rules = kwrules.load_rules(self.conn)
+        # Users with their own alert webhook: (user row, their personal view, parsed filter)
+        self.personal = []
+        for u in self.conn.execute(
+                "SELECT * FROM users WHERE active = 1 AND notify_url != ''").fetchall():
+            self.personal.append((dict(u), kwrules.load_view(self.conn, u["id"]),
+                                  auth.parse_capcode_filter(u["capcode_filter"])))
+
+    def load_config(self) -> None:
+        self.config_version = db.get_setting(self.conn, "config_version")
+        self.load_rules()
         channels = [
             dict(r) for r in self.conn.execute("SELECT * FROM channels WHERE enabled = 1")
         ]
@@ -301,6 +314,20 @@ class Decoder:
             threading.Thread(
                 target=send_webhook, args=(self.webhook_url, payload), daemon=True
             ).start()
+        # Personal alerts go to each user's own webhook, only for pages they may see.
+        for u, view, ranges in self.personal:
+            if not auth.capcode_matches(ranges, page.capcode):
+                continue
+            shown = kwrules.apply_view(page.message, page.capcode, view, alias.get("alert", 0),
+                                       alias.get("suppress", 0), alias.get("colour", ""),
+                                       alias.get("label", ""))
+            if shown.personal_alert:
+                payload = {
+                    "id": cur.lastrowid, "ts": ts, "channel": ch["name"], "user": u["username"],
+                    "protocol": page.protocol, "capcode": page.capcode, "alias": shown.label,
+                    "keywords": shown.keywords, "type": page.msg_type, "message": page.message,
+                }
+                threading.Thread(target=send_webhook, args=(u["notify_url"], payload), daemon=True).start()
 
     def apply_status(self, channel_id: int, state: str, detail: str) -> None:
         self.conn.execute(
@@ -362,8 +389,11 @@ class Decoder:
                 last_check = now
                 db.set_setting(self.conn, "decoder_heartbeat", f"{now:.0f}")
                 if db.get_setting(self.conn, "config_version") != self.config_version:
-                    log.info("configuration changed, reloading")
+                    log.info("channel configuration changed, restarting receivers")
                     self.load_config()
+                elif db.get_setting(self.conn, "rules_version") != self.rules_version:
+                    log.info("rules changed, reloading (receivers keep running)")
+                    self.load_rules()
             if now - self.last_purge > 3600:
                 self.purge()
         self.stop_runners()

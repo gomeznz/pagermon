@@ -2,13 +2,13 @@
 {% block title %}Users · MultipagePlus{% endblock %}
 {% block content %}
 <h1>Users</h1>
-<p class="muted"><strong>Admins</strong> can change configuration and manage users. <strong>Viewers</strong> can see messages only. A capcode filter limits which messages a user can see; leave it blank for all.</p>
+<p class="muted"><strong>Admins</strong> can change configuration and manage users. <strong>Viewers</strong> can see messages only. A capcode filter limits which messages a user can see; leave it blank for all. Everyone can set up their own labels, keywords, alerts and kiosks under <strong>My filters</strong>, always within their capcode filter.</p>
 
 {% for u in users %}
 <section class="card user-card">
   <div class="user-head">
     <h2>{{ u.username }}{% if u.id == user.id %} <span class="tag">you</span>{% endif %}</h2>
-    <span class="muted small">Last sign-in: {{ u.last_login|ts }}</span>
+    <span class="muted small">{{ u.n_caps }} personal capcode{{ '' if u.n_caps == 1 else 's' }} · {{ u.n_kws }} keyword{{ '' if u.n_kws == 1 else 's' }} · {{ u.n_kiosks }} kiosk{{ '' if u.n_kiosks == 1 else 's' }}{% if u.notify_url %} · alerts on{% endif %} · last sign-in {{ u.last_login|ts }}</span>
   </div>
   <form method="post" action="/users/{{ u.id }}/update" class="grid">
     <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -19,6 +19,7 @@
       </select>
     </label>
     <label>Capcode filter <input name="capcode_filter" value="{{ u.capcode_filter }}" placeholder="all"></label>
+    <label>Personal kiosks allowed <input name="max_kiosks" type="number" min="0" max="50" value="{{ u.max_kiosks }}"><small>0 = none. Admins have no limit.</small></label>
     <label class="check"><input type="checkbox" name="active" value="1" {% if u.active %}checked{% endif %}> Active</label>
     <div class="form-actions"><button>Save</button></div>
   </form>
