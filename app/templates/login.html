@@ -1,9 +1,26 @@
 {% extends "base.html" %}
 {% block title %}Sign in · MultipagePlus{% endblock %}
+{% block body_class %}login-page{% endblock %}
 {% block main_class %}page narrow login{% endblock %}
+{% block background %}
+<div class="lbg" id="lbg" aria-hidden="true">
+  <div class="lbg-aurora a1"></div>
+  <div class="lbg-aurora a2"></div>
+  <div class="lbg-aurora a3"></div>
+  <div class="lbg-grid"></div>
+  <div class="lbg-grid lbg-grid-lit"></div>
+  <div class="lbg-wave w1"></div>
+  <div class="lbg-wave w2"></div>
+  <div class="lbg-tx" id="lbg-tx">
+    <span class="ring"></span><span class="ring"></span><span class="ring"></span><span class="ring"></span>
+    <span class="core"></span>
+  </div>
+</div>
+{% endblock %}
 {% block content %}
-<div class="card">
+<div class="card login-card">
   <h1><span class="brand-mark" aria-hidden="true"></span><span class="wordmark">Multipage<span class="plus">Plus</span></span></h1>
+  <p class="login-sub">POCSAG &amp; FLEX paging monitor</p>
   <form method="post" action="/login" class="stack">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="next" value="{{ next }}">
@@ -17,3 +34,4 @@
   </form>
 </div>
 {% endblock %}
+{% block scripts %}<script src="/static/login-bg.js?v={{ version }}"></script>{% endblock %}

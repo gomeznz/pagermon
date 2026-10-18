@@ -391,3 +391,120 @@ form.inline select { flex: 0 0 auto; }
   .kr-headrow { font-size: 0.6rem; }
   .capcode-table td.routes-cell { width: 100%; max-width: none; }
 }
+
+/* ---------- Sign-in page: animated radio background ---------- */
+body.login-page {
+  --lbg-base: #e6f1ee; --lbg-base2: #d3e8e2;
+  --lbg-a1: #2dd4bf; --lbg-a2: #f59e0b; --lbg-a3: #22d3ee;
+  --lbg-aurora-op: 0.35; --lbg-blend: multiply;
+  --lbg-dot: rgba(15, 118, 110, 0.16); --lbg-dot-lit: rgba(15, 118, 110, 0.55);
+  --lbg-ring: rgba(13, 148, 136, 0.55); --lbg-burst: #d97706; --lbg-wave: rgba(15, 118, 110, 0.22);
+  background: radial-gradient(120% 90% at 20% 10%, var(--lbg-base) 0%, var(--lbg-base2) 100%);
+  overflow-x: hidden;
+}
+@media (prefers-color-scheme: dark) {
+  body.login-page {
+    --lbg-base: #0c1a18; --lbg-base2: #060c0b;
+    --lbg-aurora-op: 0.42; --lbg-blend: screen;
+    --lbg-dot: rgba(94, 234, 212, 0.10); --lbg-dot-lit: rgba(94, 234, 212, 0.65);
+    --lbg-ring: rgba(45, 212, 191, 0.6); --lbg-burst: #fbbf24; --lbg-wave: rgba(94, 234, 212, 0.18);
+ 
+  }
+  body.login-page .lbg-aurora.a2 { opacity: calc(var(--lbg-aurora-op) * 0.42); }
+}
+body.login-page main, body.login-page .foot { position: relative; z-index: 1; }
+
+.lbg {
+  position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none;
+  --mx: 50vw; --my: 50vh;   /* cursor, set by login-bg.js */
+  --tx: 50vw; --ty: 50vh;   /* transmitter (eases after the cursor) */
+  --px: 0; --py: 0;         /* -1..1 parallax */
+}
+
+/* Slow drifting colour fields */
+.lbg-aurora {
+  position: absolute; width: 62vmax; height: 62vmax; border-radius: 50%;
+  filter: blur(70px); opacity: var(--lbg-aurora-op); mix-blend-mode: var(--lbg-blend);
+  will-change: transform;
+}
+.lbg-aurora.a1 { background: var(--lbg-a1); left: -18vmax; top: -22vmax;
+  animation: lbg-drift-a 26s ease-in-out infinite alternate; translate: calc(var(--px) * -3vmax) calc(var(--py) * -3vmax); }
+.lbg-aurora.a2 { background: var(--lbg-a2); right: -24vmax; bottom: -26vmax; opacity: calc(var(--lbg-aurora-op) * 0.75);
+  animation: lbg-drift-b 32s ease-in-out infinite alternate; translate: calc(var(--px) * 4vmax) calc(var(--py) * 4vmax); }
+.lbg-aurora.a3 { background: var(--lbg-a3); width: 40vmax; height: 40vmax; left: 35vw; top: 40vh; opacity: calc(var(--lbg-aurora-op) * 0.6);
+  animation: lbg-drift-c 21s ease-in-out infinite alternate; translate: calc(var(--px) * 7vmax) calc(var(--py) * 7vmax); }
+@keyframes lbg-drift-a { to { transform: translate(14vw, 10vh) scale(1.15); } }
+@keyframes lbg-drift-b { to { transform: translate(-12vw, -14vh) scale(0.9); } }
+@keyframes lbg-drift-c { 0% { transform: translate(-20vw, -10vh) scale(0.8); } 100% { transform: translate(10vw, 12vh) scale(1.2); } }
+
+/* Dot grid, plus a brighter copy revealed only around the cursor */
+.lbg-grid {
+  position: absolute; inset: -40px;
+  background-image: radial-gradient(circle, var(--lbg-dot) 1.4px, transparent 1.6px);
+  background-size: 28px 28px;
+  translate: calc(var(--px) * -10px) calc(var(--py) * -10px);
+}
+.lbg-grid-lit {
+  background-image: radial-gradient(circle, var(--lbg-dot-lit) 1.6px, transparent 1.9px);
+  -webkit-mask-image: radial-gradient(220px circle at calc(var(--mx) + 40px) calc(var(--my) + 40px), #000 0%, transparent 100%);
+          mask-image: radial-gradient(220px circle at calc(var(--mx) + 40px) calc(var(--my) + 40px), #000 0%, transparent 100%);
+}
+
+/* Signal waveforms gliding along the bottom */
+.lbg-wave {
+  position: absolute; left: -240px; right: -240px; height: 60px; bottom: 9vh;
+  background: var(--lbg-wave);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='60' viewBox='0 0 240 60'%3E%3Cpath d='M0 30 Q30 2 60 30 T120 30 T180 30 T240 30' fill='none' stroke='black' stroke-width='2'/%3E%3C/svg%3E") repeat-x 0 0 / 240px 60px;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='60' viewBox='0 0 240 60'%3E%3Cpath d='M0 30 Q30 2 60 30 T120 30 T180 30 T240 30' fill='none' stroke='black' stroke-width='2'/%3E%3C/svg%3E") repeat-x 0 0 / 240px 60px;
+  animation: lbg-wave 9s linear infinite;
+}
+.lbg-wave.w2 { bottom: calc(9vh - 18px); height: 60px; opacity: 0.6; transform: scaleY(0.55);
+  animation-duration: 14s; animation-direction: reverse; }
+@keyframes lbg-wave { to { translate: 240px 0; } }
+
+/* The "transmitter": rings pulse outward from it, and it follows the cursor */
+.lbg-tx { position: absolute; left: var(--tx); top: var(--ty); width: 0; height: 0; }
+.lbg-tx .ring, .lbg-burst {
+  position: absolute; left: 0; top: 0; width: 70vmax; height: 70vmax; margin: -35vmax 0 0 -35vmax;
+  border-radius: 50%; border: 2px solid var(--lbg-ring); opacity: 0; transform: scale(0.02);
+  animation: lbg-ripple 6s cubic-bezier(0.2, 0.6, 0.4, 1) infinite; will-change: transform, opacity;
+}
+.lbg-tx .ring:nth-child(2) { animation-delay: 1.5s; }
+.lbg-tx .ring:nth-child(3) { animation-delay: 3s; }
+.lbg-tx .ring:nth-child(4) { animation-delay: 4.5s; }
+@keyframes lbg-ripple {
+  0% { transform: scale(0.02); opacity: 0.9; }
+  70% { opacity: 0.12; }
+  100% { transform: scale(1); opacity: 0; }
+}
+.lbg-tx .core {
+  position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
+  background: var(--lbg-ring); box-shadow: 0 0 18px 6px var(--lbg-ring);
+  animation: lbg-core 1.5s ease-in-out infinite;
+}
+@keyframes lbg-core { 50% { transform: scale(1.6); opacity: 0.55; } }
+
+/* Click/tap bursts (created by login-bg.js) */
+.lbg-burst { border-color: var(--lbg-burst); border-width: 3px; width: 50vmax; height: 50vmax; margin: -25vmax 0 0 -25vmax;
+  animation: lbg-burst 1.6s cubic-bezier(0.1, 0.7, 0.3, 1) forwards; }
+@keyframes lbg-burst { 0% { transform: scale(0.01); opacity: 1; } 100% { transform: scale(1); opacity: 0; } }
+
+/* Frosted card on top */
+.login-card {
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+          backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  padding: 1.6rem 1.6rem 1.7rem;
+  animation: lbg-card-in 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.login-card h1 { margin-bottom: 0.15rem; font-size: 1.6rem; }
+.login-sub { margin: 0 0 1.2rem; color: var(--muted); font-size: 0.9rem; }
+@keyframes lbg-card-in { from { opacity: 0; transform: translateY(14px) scale(0.98); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .lbg *, .login-card { animation: none !important; }
+  .lbg-tx .ring:first-child { opacity: 0.25; transform: scale(0.35); }
+  .lbg-tx .ring:nth-child(2) { opacity: 0.15; transform: scale(0.6); }
+}

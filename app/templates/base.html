@@ -7,7 +7,8 @@
   <link rel="stylesheet" href="/static/style.css?v={{ version }}">
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
+{% block background %}{% endblock %}
 {% if user %}
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark">Multipage<span class="plus">Plus</span></span></a>
