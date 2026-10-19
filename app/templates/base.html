@@ -15,7 +15,8 @@
   <nav>
     <a href="/" {% if page_name == 'live' %}aria-current="page"{% endif %}>Live</a>
     <a href="/history" {% if page_name == 'history' %}aria-current="page"{% endif %}>History</a>
-    <a href="/my" {% if page_name == 'my' %}aria-current="page"{% endif %}>My filters</a>
+    <a href="/my" {% if page_name == 'my' %}aria-current="page"{% endif %}>My capcodes</a>
+    <a href="/my/kiosks" {% if page_name == 'mykiosks' %}aria-current="page"{% endif %}>My kiosks</a>
     {% if user.role == 'admin' %}
     <a href="/capcodes" {% if page_name == 'capcodes' %}aria-current="page"{% endif %}>Capcodes</a>
     <a href="/config" {% if page_name == 'config' %}aria-current="page"{% endif %}>Config</a>

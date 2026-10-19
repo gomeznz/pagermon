@@ -33,6 +33,12 @@ limiter = auth.LoginLimiter()
 PAGE_SIZE = 100
 # Display colours for capcodes. Names map to CSS classes (c-<name>) with
 # separate light and dark shades, so every colour stays readable in both.
+# The Capcodes template serves both the shared rules (admins) and each user's own.
+SHARED_SCOPE = {"personal": False, "scope": "shared", "title": "Capcodes", "page": "/capcodes",
+                "capcode_url": "/config/alias", "keyword_url": "/config/keyword", "alert_word": "Alert"}
+PERSONAL_SCOPE = {"personal": True, "scope": "personal", "title": "My capcodes", "page": "/my",
+                  "capcode_url": "/my/capcode", "keyword_url": "/my/keyword", "alert_word": "Alert me"}
+
 COLOURS = ("red", "orange", "amber", "lime", "green", "teal",
            "cyan", "blue", "indigo", "purple", "pink", "grey")
 ALLOWED_ARG_RE = re.compile(r"^[A-Za-z0-9 .:=_+,/-]*$")
@@ -711,7 +717,7 @@ def create_app() -> FastAPI:
         await _feed(websocket, conn, "1=1", [], still_allowed, keep=keep, backlog=200,
                     load_view=lambda: kwrules.load_view(conn, owner_id))
 
-    # --- My filters: each user's personal rules, kiosks and alerts -----------
+    # --- My capcodes / My kiosks: each user's personal rules, kiosks and alerts --
 
     def _my_kiosks(conn, uid):
         return conn.execute("SELECT * FROM kiosks WHERE owner_id = ? ORDER BY name COLLATE NOCASE",
@@ -773,12 +779,21 @@ def create_app() -> FastAPI:
             routes = _my_route_summary(conn, uid)
             e_routes = {r["kiosk_id"]: r["action"] for r in routes.get(("capcode", e["id"]), [])} if e else {}
             k_routes = {r["kiosk_id"]: r["action"] for r in routes.get(("keyword", k["id"]), [])} if k else {}
-            limit = _kiosk_limit(user)
-            return render(request, "my.html", user, caps=caps, kws=kws, e=e, k=k, prefill=prefill,
-                          colours=COLOURS, kiosks=kiosks, routes=routes, e_routes=e_routes,
-                          k_routes=k_routes, kiosk_limit=limit,
+            return render(request, "capcodes.html", user, aliases=caps, keywords=kws, e=e, k=k,
+                          prefill=prefill, colours=COLOURS, kiosks=kiosks, routes=routes,
+                          e_routes=e_routes, k_routes=k_routes,
                           kiosk_opts=[(0, "All my kiosks")] + [(r["id"], r["name"]) for r in kiosks],
-                          base_url=str(request.base_url).rstrip("/"), page_name="my")
+                          sc=PERSONAL_SCOPE, page_name="my")
+        finally:
+            conn.close()
+
+    @app.get("/my/kiosks", response_class=HTMLResponse)
+    async def my_kiosks_page(request: Request):
+        conn, user = require_user(request)
+        try:
+            return render(request, "my_kiosks.html", user, kiosks=_my_kiosks(conn, user["id"]),
+                          kiosk_limit=_kiosk_limit(user),
+                          base_url=str(request.base_url).rstrip("/"), page_name="mykiosks")
         finally:
             conn.close()
 
@@ -792,11 +807,11 @@ def create_app() -> FastAPI:
             capcode = capcode.strip()
             if not capcode.isdigit():
                 flash(request, "Enter a numeric capcode.", "error")
-                return back("/my#my-capcodes")
+                return back("/my")
             capcode = str(int(capcode))
             if not auth.capcode_matches(auth.parse_capcode_filter(user["capcode_filter"]), capcode):
                 flash(request, f"Capcode {capcode} is outside the capcodes you can see.", "error")
-                return back("/my#my-capcodes")
+                return back("/my")
             label = label.strip()[:60]
             colour = colour if colour in COLOURS else ""
             sup = 1 if suppress else 0
@@ -804,7 +819,7 @@ def create_app() -> FastAPI:
             has_routes = any(k.startswith("kiosk_") and v for k, v in (await request.form()).multi_items())
             if not (label or sup or al or colour or has_routes):
                 flash(request, "Give the capcode a label, colour, alert, kiosk setting, or tick Suppress.", "error")
-                return back("/my#my-capcodes")
+                return back("/my")
             with db.transaction(conn):
                 conn.execute(
                     "INSERT INTO user_aliases (user_id, capcode, label, alert, suppress, colour) "
@@ -815,8 +830,8 @@ def create_app() -> FastAPI:
                                    (user["id"], capcode)).fetchone()["id"]
                 await _save_my_routes(request, conn, user["id"], "capcode", rid)
                 db.bump_rules_version(conn)
-            flash(request, f"Saved {capcode} in your filters.")
-            return back("/my#my-capcodes")
+            flash(request, f"Saved {capcode}.")
+            return back("/my")
         finally:
             conn.close()
 
@@ -831,7 +846,7 @@ def create_app() -> FastAPI:
             keyword = " ".join(keyword.split())[:60]
             if not keyword:
                 flash(request, "Enter a word or phrase.", "error")
-                return back("/my#my-keywords")
+                return back("/my#keywords")
             match = match if match in kwrules.MATCH_MODES else "word"
             colour = colour if colour in COLOURS else ""
             al = 1 if alert else 0
@@ -839,13 +854,13 @@ def create_app() -> FastAPI:
             has_routes = any(k.startswith("kiosk_") and v for k, v in (await request.form()).multi_items())
             if not (al or sup or colour or has_routes):
                 flash(request, "Choose at least one of Alert, Suppress, a colour or a kiosk setting.", "error")
-                return back(f"/my?kw={id}#keyword-form" if id else "/my#my-keywords")
+                return back(f"/my?kw={id}#keyword-form" if id else "/my#keywords")
             if id and not conn.execute("SELECT 1 FROM user_keywords WHERE id = ? AND user_id = ?", (id, uid)).fetchone():
-                return back("/my#my-keywords")
+                return back("/my#keywords")
             if conn.execute("SELECT 1 FROM user_keywords WHERE user_id = ? AND keyword = ? AND id != ?",
                             (uid, keyword, id)).fetchone():
                 flash(request, f"\u201c{keyword}\u201d is already in your keywords.", "error")
-                return back("/my#my-keywords")
+                return back("/my#keywords")
             with db.transaction(conn):
                 if id:
                     conn.execute("UPDATE user_keywords SET keyword=?, match=?, alert=?, suppress=?, colour=? "
@@ -856,8 +871,8 @@ def create_app() -> FastAPI:
                                        "VALUES (?, ?, ?, ?, ?, ?)", (uid, keyword, match, al, sup, colour)).lastrowid
                 await _save_my_routes(request, conn, uid, "keyword", rid)
                 db.bump_rules_version(conn)
-            flash(request, f"Saved keyword \u201c{keyword}\u201d in your filters.")
-            return back("/my#my-keywords")
+            flash(request, f"Saved keyword \u201c{keyword}\u201d.")
+            return back("/my#keywords")
         finally:
             conn.close()
 
@@ -883,11 +898,11 @@ def create_app() -> FastAPI:
             if limit is not None and have >= limit:
                 flash(request, "You've reached your kiosk limit. Ask an admin if you need more." if limit
                       else "Personal kiosks aren't enabled for your account. Ask an admin.", "error")
-                return back("/my#my-kiosks")
+                return back("/my/kiosks")
             f, problem = _kiosk_form(name, capcode_filter, theme, mode)
             if problem:
                 flash(request, problem, "error")
-                return back("/my#my-kiosks")
+                return back("/my/kiosks")
             with db.transaction(conn):
                 conn.execute(
                     "INSERT INTO kiosks (name, token, capcode_filter, theme, hide_tone, mode, owner_id, created_at) "
@@ -896,7 +911,7 @@ def create_app() -> FastAPI:
                      1 if hide_tone else 0, f["mode"], user["id"], time.time()))
                 db.audit(conn, user["username"], "my_kiosk_create", f["name"])
             flash(request, f"Kiosk \u201c{f['name']}\u201d created. Open its link on the display.")
-            return back("/my#my-kiosks")
+            return back("/my/kiosks")
         finally:
             conn.close()
 
@@ -908,16 +923,16 @@ def create_app() -> FastAPI:
         conn, user = require_user(request)
         try:
             if not conn.execute("SELECT 1 FROM kiosks WHERE id = ? AND owner_id = ?", (kid, user["id"])).fetchone():
-                return back("/my#my-kiosks")
+                return back("/my/kiosks")
             f, problem = _kiosk_form(name, capcode_filter, theme, mode)
             if problem:
                 flash(request, problem, "error")
-                return back("/my#my-kiosks")
+                return back("/my/kiosks")
             with db.transaction(conn):
                 conn.execute("UPDATE kiosks SET name=?, capcode_filter=?, theme=?, hide_tone=?, mode=? WHERE id=?",
                              (f["name"], f["capcode_filter"], f["theme"], 1 if hide_tone else 0, f["mode"], kid))
             flash(request, f"Saved kiosk \u201c{f['name']}\u201d.")
-            return back("/my#my-kiosks")
+            return back("/my/kiosks")
         finally:
             conn.close()
 
@@ -941,7 +956,7 @@ def create_app() -> FastAPI:
                             conn.execute(f"UPDATE {table} SET suppress = ?, alert = CASE WHEN ? THEN 0 ELSE alert END "
                                          "WHERE id = ?", (sup, sup, rid))
                         db.bump_rules_version(conn)
-                return back("/my#my-capcodes" if kind == "capcode" else "/my#my-keywords")
+                return back("/my" if kind == "capcode" else "/my#keywords")
             if kind == "kiosk" and action in ("toggle", "newlink", "delete"):
                 row = conn.execute("SELECT * FROM kiosks WHERE id = ? AND owner_id = ?", (rid, uid)).fetchone()
                 if row:
@@ -955,7 +970,7 @@ def create_app() -> FastAPI:
                             conn.execute("DELETE FROM kiosks WHERE id = ?", (rid,))
                             conn.execute("DELETE FROM user_routes WHERE kiosk_id = ? AND user_id = ?", (rid, uid))
                         db.audit(conn, user["username"], f"my_kiosk_{action}", row["name"])
-                return back("/my#my-kiosks")
+                return back("/my/kiosks")
             return back("/my")
         finally:
             conn.close()
@@ -969,7 +984,7 @@ def create_app() -> FastAPI:
             url = notify_url.strip()
             if url and not re.match(r"^https?://[^\s]+$", url):
                 flash(request, "The alert URL must start with http:// or https://", "error")
-                return back("/my#my-alerts")
+                return back("/my/kiosks#my-alerts")
             with db.transaction(conn):
                 conn.execute("UPDATE users SET notify_url = ? WHERE id = ?", (url, user["id"]))
                 db.bump_rules_version(conn)
@@ -981,7 +996,7 @@ def create_app() -> FastAPI:
                       "error" if problem else "ok")
             else:
                 flash(request, "Alert address saved." if url else "Personal alerts turned off.")
-            return back("/my#my-alerts")
+            return back("/my/kiosks#my-alerts")
         finally:
             conn.close()
 
@@ -1064,6 +1079,7 @@ def create_app() -> FastAPI:
                           prefill=prefill, colours=COLOURS, keywords=keywords, k=k,
                           kiosks=kiosks, routes=routes, e_routes=e_routes, k_routes=k_routes,
                           kiosk_opts=[(0, "All kiosks")] + [(r["id"], r["name"]) for r in kiosks],
+                          sc=SHARED_SCOPE,
                           page_name="capcodes")
         finally:
             conn.close()

@@ -418,7 +418,10 @@ def test_personal_filters_only_affect_owner(app):
     v = TestClient(app)
     login(v, "viewer1", "a brand new password")      # filter: 1000-1999, 5555
     page = v.get("/my")
-    assert page.status_code == 200 and "My capcodes" in page.text
+    assert page.status_code == 200 and "<h1>My capcodes</h1>" in page.text
+    assert 'id="keywords"' in page.text and 'action="/my/capcode"' in page.text and "/config/alias" not in page.text
+    kp = v.get("/my/kiosks")
+    assert kp.status_code == 200 and "My kiosks &amp; alerts" in kp.text and 'name="notify_url"' in kp.text
     token = csrf_of(page.text)
     # outside the user's filter is refused
     v.post("/my/capcode", data={"csrf": token, "capcode": "9999", "label": "nope"})

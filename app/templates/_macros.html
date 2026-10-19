@@ -1,4 +1,4 @@
-{# Form pieces shared by the Capcodes (shared rules) and My filters (personal rules) pages. #}
+{# Form pieces shared by the Capcodes (shared rules) and My capcodes (personal rules) pages. #}
 {% macro swatches(cur, colours) %}
     <fieldset class="swatches">
       <legend>Colour</legend>
@@ -26,7 +26,7 @@
       </div>
       <small class="muted">A setting for a named kiosk beats &ldquo;{{ opts[0][1] }}&rdquo;. <strong>Forward</strong> shows the page even if that kiosk wouldn't normally show it; <strong>Alert</strong> forwards it as an alert; <strong>Suppress</strong> hides it there.</small>
       {% elif scope == 'personal' %}
-      <small class="muted">Create a kiosk under <a href="#my-kiosks">My kiosks</a> to forward pages to it.</small>
+      <small class="muted">Create a kiosk under <a href="/my/kiosks">My kiosks</a> to forward pages to it.</small>
       {% else %}
       <small class="muted">No kiosks yet. Create one under <a href="/config#kiosks">Config &rarr; Kiosk displays</a> to forward pages to it.</small>
       {% endif %}

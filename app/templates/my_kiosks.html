@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% import "_macros.html" as mx %}
+{% block title %}My kiosks & alerts · MultipagePlus{% endblock %}
+{% block content %}
+<h1>My kiosks &amp; alerts</h1>
+<section class="card" id="my-kiosks">
+  <h2>Kiosks</h2>
+    {% if kiosk_limit == 0 and not kiosks %}
+  <p class="muted">Personal kiosks aren't enabled for your account. Ask an admin if you'd like one.</p>
+  {% else %}
+  <p class="muted">A full-screen, read-only live view for a screen of your own, opened from a secret link with no sign-in. It uses your settings from My capcodes, and it can never show anything you can't see yourself. Treat the link like a password.{% if kiosk_limit is not none %} You can have up to {{ kiosk_limit }}.{% endif %}</p>
+  <div class="kiosk-list">
+    {% for kk in kiosks %}
+    <div class="kiosk{% if not kk.active %} is-off{% endif %}">
+      <div class="kiosk-head">
+        <strong>{{ kk.name }}</strong>
+        {% if kk.active %}<span class="tag ok">enabled</span>{% else %}<span class="tag">disabled</span>{% endif %}
+        <span class="small muted">{{ 'only forwarded pages' if kk.mode == 'forwarded' else 'all pages' }} · {{ kk.theme }} theme · last viewed {{ kk.last_seen|ts if kk.last_seen else 'never' }}</span>
+      </div>
+      <div class="kiosk-link">
+        <input class="mono" readonly value="{{ base_url }}/kiosk/{{ kk.token }}" aria-label="Kiosk link for {{ kk.name }}">
+        <button type="button" class="small copy-link">Copy</button>
+        <a class="button small" href="/kiosk/{{ kk.token }}" target="_blank" rel="noopener noreferrer">Open ↗</a>
+      </div>
+      <div class="actions kiosk-actions">
+        <form method="post" action="/my/kiosk/{{ kk.id }}/toggle"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">{% if kk.active %}Disable{% else %}Enable{% endif %}</button></form>
+        <form method="post" action="/my/kiosk/{{ kk.id }}/newlink" class="confirm" data-confirm="Make a new link for {{ kk.name }}? The current link will stop working."><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">New link</button></form>
+        <form method="post" action="/my/kiosk/{{ kk.id }}/delete" class="confirm" data-confirm="Remove kiosk {{ kk.name }}?"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Remove</button></form>
+      </div>
+      <details class="kiosk-edit">
+        <summary>Settings</summary>
+        {{ mx.kiosk_settings(kk, '/my/kiosk/' ~ kk.id ~ '/edit', csrf) }}
+      </details>
+    </div>
+    {% endfor %}
+  </div>
+  {% if kiosk_limit is none or kiosks|length < kiosk_limit %}
+  <h3>Add kiosk</h3>
+  {{ mx.kiosk_settings(none, '/my/kiosk', csrf, 'Create kiosk') }}
+  {% endif %}
+  {% endif %}
+</section>
+
+<section class="card" id="my-alerts">
+  <h2>Alerts</h2>
+  <p class="muted">Pages that match the capcodes and keywords you've ticked <strong>Alert me</strong> on (under <a href="/my">My capcodes</a>) are sent here as JSON, for example to an <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a> topic for phone notifications, Home Assistant or Node-RED. You can also tick <strong>Notify me</strong> on the Live screen for pop-up notifications in your browser.</p>
+  <form method="post" action="/my/notify" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="notify_url" class="mono" value="{{ user.notify_url }}" placeholder="https://ntfy.sh/your-private-topic" aria-label="Alert webhook URL">
+    <button class="primary">Save</button>
+    <button name="test" value="1">Save &amp; send test</button>
+  </form>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/confirm.js?v={{ version }}"></script><script src="/static/config.js?v={{ version }}"></script>{% endblock %}

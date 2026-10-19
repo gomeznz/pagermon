@@ -1,29 +1,33 @@
 {% extends "base.html" %}
-{% block title %}Capcodes · MultipagePlus{% endblock %}
+{% block title %}{{ sc.title }} · MultipagePlus{% endblock %}
 {% import "_macros.html" as mx %}
 {% block content %}
-<h1>Capcodes</h1>
+<h1>{{ sc.title }}</h1>
 <section class="card" id="aliases">
-    <p class="muted">Label capcodes you know, such as your own test pagers, and give them a <strong>colour</strong> to pick them out on the Live and History screens. Tick <strong>Alert</strong> to send their pages to the webhook, or <strong>Suppress</strong> to hide a noisy capcode from the Live screen. Suppressed pages are still recorded and can be shown with <em>Show suppressed</em>. Use the <strong>Kiosks</strong> settings to forward, alert or suppress a capcode's pages on particular kiosk displays.</p>
+    {% if sc.personal %}
+    <p class="muted">Your own capcode settings. Label capcodes you know and give them a <strong>colour</strong> to pick them out on the Live and History screens. Tick <strong>Alert me</strong> to be notified of their pages (set up under <a href="/my/kiosks#my-alerts">My kiosks &rarr; Alerts</a>), or <strong>Suppress</strong> to hide a noisy capcode from your Live screen. These only change what <strong>you</strong> see and your own kiosks; they sit on top of the shared settings.{% if user.capcode_filter %} You can see capcodes <span class="mono">{{ user.capcode_filter }}</span>.{% endif %}</p>
+    {% else %}
+    <p class="muted">Label capcodes you know, such as your own test pagers, and give them a <strong>colour</strong> to pick them out on the Live and History screens. Tick <strong>Alert</strong> to send their pages to the webhook, or <strong>Suppress</strong> to hide a noisy capcode from the Live screen. Suppressed pages are still recorded and can be shown with <em>Show suppressed</em>. Use the <strong>Kiosks</strong> settings to forward, alert or suppress a capcode's pages on particular kiosk displays. These are the shared settings everyone sees; users can add their own under My capcodes.</p>
+    {% endif %}
   <div class="table-wrap">
     <table class="capcode-table">
       <thead><tr><th>Capcode</th><th>Label</th><th>Alert</th><th>Suppressed</th><th>Pages</th><th>Last seen</th><th>Kiosks</th><th></th></tr></thead>
       <tbody>
       {% for a in aliases %}
         <tr class="{% if a.suppress %}suppressed-row{% endif %}{% if a.colour %} c-{{ a.colour }}{% endif %}">
-          <td class="mono"><span class="swatch-dot" aria-hidden="true"></span>{{ a.capcode }}</td><td>{{ a.label or '' }}</td>
+          <td class="mono"><span class="swatch-dot" aria-hidden="true"></span>{{ a.capcode }}</td><td>{{ a.label or '' }}{% if a.shared_label and a.shared_label != a.label %}<span class="small muted shared-label">shared: {{ a.shared_label }}</span>{% endif %}</td>
           <td>{% if a.alert %}<span class="tag ok">on</span>{% endif %}</td>
           <td>{% if a.suppress %}<span class="tag warn">suppressed</span>{% endif %}</td>
           <td class="mono">{{ a.pages }}</td>
           <td class="time small">{{ a.last_seen|ts if a.last_seen else '—' }}</td>
           <td class="routes-cell">{{ mx.route_chips(routes.get(('capcode', a.id), [])) }}</td>
           <td class="actions">
-            <a class="button small" href="/capcodes?edit={{ a.capcode }}#capcode-form">Edit</a>
-            <form method="post" action="/config/alias/{{ a.id }}/suppress">
+            <a class="button small" href="{{ sc.page }}?edit={{ a.capcode }}#capcode-form">Edit</a>
+            <form method="post" action="{{ sc.capcode_url }}/{{ a.id }}/suppress">
               <input type="hidden" name="csrf" value="{{ csrf }}">
               <button class="small">{% if a.suppress %}Unsuppress{% else %}Suppress{% endif %}</button>
             </form>
-            <form method="post" action="/config/alias/{{ a.id }}/delete">
+            <form method="post" action="{{ sc.capcode_url }}/{{ a.id }}/delete">
               <input type="hidden" name="csrf" value="{{ csrf }}">
               <button class="small danger">Remove</button>
             </form>
@@ -36,22 +40,22 @@
     </table>
   </div>
   <h3 id="capcode-form">{% if e %}Edit {{ e.capcode }}{% else %}Add capcode{% endif %}</h3>
-  <form method="post" action="/config/alias" class="inline">
+  <form method="post" action="{{ sc.capcode_url }}" class="inline">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input name="capcode" placeholder="Capcode" inputmode="numeric" required aria-label="Capcode" value="{{ e.capcode if e else prefill }}">
-    <input name="label" placeholder="Label (optional if suppressing)" maxlength="60" aria-label="Label" value="{{ e.label if e else '' }}">
-    <label class="check"><input type="checkbox" name="alert" value="1" {% if e and e.alert %}checked{% endif %}> Alert</label>
+    <input name="label" placeholder="{{ 'My label (optional)' if sc.personal else 'Label (optional if suppressing)' }}" maxlength="60" aria-label="Label" value="{{ e.label if e else '' }}">
+    <label class="check"><input type="checkbox" name="alert" value="1" {% if e and e.alert %}checked{% endif %}> {{ sc.alert_word }}</label>
     <label class="check"><input type="checkbox" name="suppress" value="1" {% if e and e.suppress %}checked{% endif %}> Suppress</label>
     {{ mx.swatches(e.colour if e else '', colours) }}
-    {{ mx.kiosk_routes(e_routes, kiosk_opts, 'shared') }}
+    {{ mx.kiosk_routes(e_routes, kiosk_opts, sc.scope) }}
     <div class="form-actions"><button class="primary">Save</button>
-    {% if e %}<a class="button" href="/capcodes">Cancel</a>{% endif %}</div>
+    {% if e %}<a class="button" href="{{ sc.page }}">Cancel</a>{% endif %}</div>
   </form>
 </section>
 
 <section class="card" id="keywords">
   <h2>Keywords</h2>
-  <p class="muted">Match words or phrases in the message text, on any capcode. A keyword can <strong>Alert</strong>, be <strong>Suppressed</strong>, or just get a <strong>colour</strong>; matches are highlighted in the message. Matching ignores case and, by default, only matches whole words (&ldquo;fire&rdquo; won't match &ldquo;firewall&rdquo;). Alerts always win: a page that alerts, by capcode or keyword, is never hidden on the Live screen. A keyword's colour takes priority over the capcode's. Both capcodes and keywords can also forward, alert or suppress pages on specific kiosks.</p>
+  <p class="muted">{% if sc.personal %}Your own keywords, matched in the message text of any page you can see.{% else %}Match words or phrases in the message text, on any capcode.{% endif %} A keyword can <strong>Alert</strong>, be <strong>Suppressed</strong>, or just get a <strong>colour</strong>; matches are highlighted in the message. Matching ignores case and, by default, only matches whole words (&ldquo;fire&rdquo; won't match &ldquo;firewall&rdquo;). Alerts always win: a page that alerts, by capcode or keyword, is never hidden on the Live screen. A keyword's colour takes priority over the capcode's. Both capcodes and keywords can also forward, alert or suppress pages on specific kiosks.</p>
   <div class="table-wrap">
     <table class="capcode-table keyword-table">
       <thead><tr><th>Keyword</th><th>Match</th><th>Alert</th><th>Suppressed</th><th>Kiosks</th><th></th></tr></thead>
@@ -64,12 +68,12 @@
           <td>{% if w.suppress %}<span class="tag warn">suppressed</span>{% endif %}</td>
           <td class="routes-cell">{{ mx.route_chips(routes.get(('keyword', w.id), [])) }}</td>
           <td class="actions">
-            <a class="button small" href="/capcodes?kw={{ w.id }}#keyword-form">Edit</a>
-            <form method="post" action="/config/keyword/{{ w.id }}/suppress">
+            <a class="button small" href="{{ sc.page }}?kw={{ w.id }}#keyword-form">Edit</a>
+            <form method="post" action="{{ sc.keyword_url }}/{{ w.id }}/suppress">
               <input type="hidden" name="csrf" value="{{ csrf }}">
               <button class="small">{% if w.suppress %}Unsuppress{% else %}Suppress{% endif %}</button>
             </form>
-            <form method="post" action="/config/keyword/{{ w.id }}/delete" class="confirm" data-confirm="Remove keyword {{ w.keyword }}?">
+            <form method="post" action="{{ sc.keyword_url }}/{{ w.id }}/delete" class="confirm" data-confirm="Remove keyword {{ w.keyword }}?">
               <input type="hidden" name="csrf" value="{{ csrf }}">
               <button class="small danger">Remove</button>
             </form>
@@ -82,7 +86,7 @@
     </table>
   </div>
   <h3 id="keyword-form">{% if k %}Edit &ldquo;{{ k.keyword }}&rdquo;{% else %}Add keyword{% endif %}</h3>
-  <form method="post" action="/config/keyword" class="inline">
+  <form method="post" action="{{ sc.keyword_url }}" class="inline">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="id" value="{{ k.id if k else 0 }}">
     <input name="keyword" placeholder="Word or phrase" required maxlength="60" aria-label="Keyword" value="{{ k.keyword if k else '' }}">
@@ -90,12 +94,12 @@
       <option value="word" {% if not k or k.match == 'word' %}selected{% endif %}>Whole word</option>
       <option value="contains" {% if k and k.match == 'contains' %}selected{% endif %}>Anywhere in text</option>
     </select>
-    <label class="check"><input type="checkbox" name="alert" value="1" {% if k and k.alert %}checked{% endif %}> Alert</label>
+    <label class="check"><input type="checkbox" name="alert" value="1" {% if k and k.alert %}checked{% endif %}> {{ sc.alert_word }}</label>
     <label class="check"><input type="checkbox" name="suppress" value="1" {% if k and k.suppress %}checked{% endif %}> Suppress</label>
     {{ mx.swatches(k.colour if k else '', colours) }}
-    {{ mx.kiosk_routes(k_routes, kiosk_opts, 'shared') }}
+    {{ mx.kiosk_routes(k_routes, kiosk_opts, sc.scope) }}
     <div class="form-actions"><button class="primary">Save</button>
-    {% if k %}<a class="button" href="/capcodes#keywords">Cancel</a>{% endif %}</div>
+    {% if k %}<a class="button" href="{{ sc.page }}#keywords">Cancel</a>{% endif %}</div>
   </form>
 </section>
 {% endblock %}
