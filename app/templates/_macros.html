@@ -52,6 +52,7 @@
             </select>
           </label>
           <label class="check"><input type="checkbox" name="hide_tone" value="1" {% if kk and kk.hide_tone %}checked{% endif %}> Hide tone-only pages</label>
+          <label class="check"><input type="checkbox" name="show_map" value="1" {% if kk and kk.show_map %}checked{% endif %}> Show map</label>
           <div class="span2 form-actions"><button class="primary">{{ submit }}</button></div>
         </form>
 {% endmacro %}

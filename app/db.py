@@ -144,6 +144,24 @@ CREATE TABLE IF NOT EXISTS keywords (
     colour   TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS message_locations (
+    id         INTEGER PRIMARY KEY,
+    message_id INTEGER NOT NULL UNIQUE,
+    lat        REAL NOT NULL,
+    lon        REAL NOT NULL,
+    radius_m   INTEGER NOT NULL DEFAULT 0,      -- 0 = exact point
+    precision  TEXT NOT NULL,                   -- point | area | locality
+    label      TEXT NOT NULL DEFAULT '',
+    display    TEXT NOT NULL DEFAULT '',
+    created    REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS geocode_cache (
+    key    TEXT PRIMARY KEY,
+    result TEXT NOT NULL,
+    ts     REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS debug_log (
     id           INTEGER PRIMARY KEY,
     ts           REAL NOT NULL,
@@ -170,6 +188,14 @@ DEFAULT_SETTINGS = {
     "webhook_url": "",
     "config_version": "1",
     "rules_version": "1",
+    "loc_enabled": "0",
+    "loc_geocoder": "https://nominatim.openstreetmap.org/search",
+    "loc_countries": "nz",
+    "loc_region": "",
+    "loc_markers": "LOC:, LOCATION:, ADDR:, ADDRESS:, @",
+    "loc_email": "",
+    "map_tiles": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    "map_attribution": "© OpenStreetMap contributors",
     "decoder_heartbeat": "0",
 }
 
@@ -228,6 +254,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if kcols and "owner_id" not in kcols:  # NULL = shared kiosk managed by admins
         conn.execute("ALTER TABLE kiosks ADD COLUMN owner_id INTEGER")
     ucols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+    if kcols and "show_map" not in kcols:
+        conn.execute("ALTER TABLE kiosks ADD COLUMN show_map INTEGER NOT NULL DEFAULT 0")
     if ucols and "max_kiosks" not in ucols:
         conn.execute("ALTER TABLE users ADD COLUMN max_kiosks INTEGER NOT NULL DEFAULT 3")
     if ucols and "notify_url" not in ucols:

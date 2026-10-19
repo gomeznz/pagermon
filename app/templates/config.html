@@ -116,6 +116,7 @@
             </select>
           </label>
           <label class="check"><input type="checkbox" name="hide_tone" value="1" {% if kk.hide_tone %}checked{% endif %}> Hide tone-only pages</label>
+          <label class="check"><input type="checkbox" name="show_map" value="1" {% if kk.show_map %}checked{% endif %}> Show map</label>
           <div class="span2 form-actions"><button class="primary">Save kiosk</button></div>
         </form>
       </details>
@@ -139,6 +140,7 @@
       <select name="theme"><option value="dark">Dark</option><option value="light">Light</option><option value="auto">Follow the screen's setting</option></select>
     </label>
     <label class="check"><input type="checkbox" name="hide_tone" value="1"> Hide tone-only pages</label>
+    <label class="check"><input type="checkbox" name="show_map" value="1"> Show map</label>
     <div class="span2 form-actions"><button class="primary">Create kiosk</button></div>
   </form>
 </section>
@@ -179,6 +181,50 @@
   <p class="muted">Capcode labels, alerts and suppression are on the <a href="/capcodes">Capcodes</a> page.</p>
 </section>
 
+
+<section class="card" id="locations">
+  <h2>Locations &amp; map</h2>
+  <p class="muted">Finds addresses in page text and shows them on the <a href="/map">Map</a>. An address with a house, RAPID or property number becomes a pin; a street, suburb or town on its own becomes a shaded area. Lookups use OpenStreetMap's Nominatim service by default (New Zealand data includes LINZ addresses and rural RAPID numbers). <strong>Turning this on sends the address part of matching pages to that service</strong>; point it at your own Nominatim server instead if you'd rather nothing leaves your network. Results are cached and limited to one lookup a second.{% if loc_stats and loc_stats.n %} In the last 24 hours: {{ loc_stats.n }} page{{ '' if loc_stats.n == 1 else 's' }} located, {{ loc_stats.pts or 0 }} to an exact address.{% endif %}</p>
+  <form method="post" action="/config/locations" class="grid">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="check span2"><input type="checkbox" name="loc_enabled" value="1" {% if loc.loc_enabled == '1' %}checked{% endif %}> Look up locations in new pages</label>
+    <label>Default town or region <input name="loc_region" value="{{ loc.loc_region }}" placeholder="e.g. Invercargill or Southland">
+      <small>Used when a page gives a street without a town.</small></label>
+    <label>Countries <input name="loc_countries" value="{{ loc.loc_countries }}" placeholder="nz">
+      <small>Two-letter codes, comma separated. Blank = anywhere.</small></label>
+    <label class="span2">Location markers <input name="loc_markers" class="mono" value="{{ loc.loc_markers }}">
+      <small>If your pages put the address after a word like <span class="mono">LOC:</span> or <span class="mono">@</span>, list them here (comma separated). Without one, addresses are found by their street type (St, Rd, Ave, Cres, SH1&hellip;).</small></label>
+    <details class="span2">
+      <summary>Advanced: geocoder and map tiles</summary>
+      <div class="grid">
+        <label class="span2">Geocoder (Nominatim search URL) <input name="loc_geocoder" class="mono" value="{{ loc.loc_geocoder }}"></label>
+        <label class="span2">Contact email for the geocoder <input name="loc_email" type="email" value="{{ loc.loc_email }}" placeholder="optional">
+          <small>The public Nominatim service asks heavy users to identify themselves.</small></label>
+        <label class="span2">Map tiles URL <input name="map_tiles" class="mono" value="{{ loc.map_tiles }}"></label>
+        <label class="span2">Map attribution <input name="map_attribution" value="{{ loc.map_attribution }}"></label>
+      </div>
+    </details>
+    <div class="span2 form-actions"><button class="primary">Save location settings</button></div>
+  </form>
+  <h3 id="loc-test">Try it</h3>
+  <p class="muted small">Paste a page you've received to see what location is found and where it lands. Uses the settings above (save first).</p>
+  <form method="post" action="/config/locations/test#loc-test" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="sample" class="mono" value="{{ loc_test.sample if loc_test else '' }}" placeholder="STRUC1 HOUSE FIRE 12 SMITH ST, INVERCARGILL" aria-label="Sample page text" required>
+    <button>Test</button>
+  </form>
+  {% if loc_test %}
+  <div class="loc-result">
+    {% if not loc_test.found %}<p><strong>No location found</strong> in that text. If your pages mark the address with a word, add it to <em>Location markers</em>.</p>
+    {% else %}<p>Found {{ loc_test.found }}.</p>
+      {% if loc_test.error %}<p class="flash flash-error">{{ loc_test.error }}</p>
+      {% elif loc_test.result %}<p><strong>{{ 'Exact address' if loc_test.result.precision == 'point' else ('Street area' if loc_test.result.precision == 'area' else 'Town / area') }}</strong>{% if loc_test.result.radius_m %} within ≈{{ loc_test.result.radius_m }} m{% endif %}: {{ loc_test.result.label }}<br>
+        <span class="mono small">{{ '%.5f'|format(loc_test.result.lat) }}, {{ '%.5f'|format(loc_test.result.lon) }}</span> <span class="muted small">{{ loc_test.result.display }}</span></p>
+      {% else %}<p>The geocoder didn't find it. Try setting a default town or region.</p>{% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
 
 <section class="card" id="settings">
   <h2>Settings</h2>

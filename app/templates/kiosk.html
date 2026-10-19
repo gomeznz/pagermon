@@ -6,9 +6,10 @@
   <meta name="robots" content="noindex, nofollow">
   <title>{{ k.name }} · MultipagePlus</title>
   <link rel="stylesheet" href="/static/kiosk.css?v={{ version }}">
+  {% if k.show_map %}<link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css?v=1.9.4">{% endif %}
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 </head>
-<body>
+<body class="{{ 'with-map' if k.show_map else '' }}">
 <header class="k-top">
   <div class="k-brand">
     <span class="k-mark" aria-hidden="true"></span>
@@ -21,9 +22,13 @@
   </div>
 </header>
 <div class="k-banner" id="k-banner" hidden>Connection lost — reconnecting…</div>
+<div class="k-body">
 <main class="k-list" id="k-list" aria-live="polite"></main>
+{% if k.show_map %}<div class="k-map" id="k-map" data-tiles="{{ cfg.map_tiles }}" data-attribution="{{ cfg.map_attribution }}"></div>{% endif %}
+</div>
 <p class="k-empty" id="k-empty">Waiting for pages…</p>
 <button class="k-fs" id="k-fs" type="button">Full screen</button>
+{% if k.show_map %}<script src="/static/vendor/leaflet/leaflet.js?v=1.9.4"></script><script src="/static/maplib.js?v={{ version }}"></script>{% endif %}
 <script src="/static/kiosk.js?v={{ version }}"></script>
 </body>
 </html>

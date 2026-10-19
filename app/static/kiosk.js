@@ -56,9 +56,55 @@
     head.appendChild(el("span", "k-proto", m.protocol + (m.channel_name ? " · " + m.channel_name : "")));
     a.appendChild(head);
     a.appendChild(messageBody(m));
+    if (m.loc) {
+      const lc = el("div", "k-loc k-loc-" + m.loc.precision, "📍 " + m.loc.label);
+      if (m.loc.precision !== "point") {
+        const r = m.loc.radius >= 1000 ? (m.loc.radius / 1000).toFixed(1) + " km" : m.loc.radius + " m";
+        lc.appendChild(el("span", "k-loc-radius", "area ≈" + r));
+      }
+      a.appendChild(lc);
+    }
+    a.dataset.id = m.id;
     if (m.alert && fresh) setTimeout(function () { a.classList.add("alert-settled"); }, ALERT_GLOW_MS);
     else if (m.alert) a.classList.add("alert-settled");
     return a;
+  }
+
+  // Optional map (kiosk setting "Show map"): one layer per card that has a location.
+  const mapNode = document.getElementById("k-map");
+  const kmap = mapNode && window.MPPMap ? MPPMap.create(mapNode) : null;
+  const mapGroup = kmap ? L.featureGroup().addTo(kmap) : null;
+  const mapLayers = new Map();   // location key -> {layer, id}; repeats of an incident share a shape
+  const idKey = new Map();       // message id -> location key
+  let mapFitted = false;
+  function plot(m, fresh) {
+    if (!kmap || !m.loc) return;
+    const key = MPPMap.keyOf(m);
+    const prev = mapLayers.get(key);
+    if (prev && prev.id > m.id) { idKey.set(m.id, key); return; }
+    if (prev) mapGroup.removeLayer(prev.layer);
+    const layer = MPPMap.layerFor(m).addTo(mapGroup);
+    mapLayers.set(key, { layer: layer, id: m.id });
+    idKey.set(m.id, key);
+    if (fresh) MPPMap.focusOn(kmap, m, layer, false);   // fly to the newest located page
+  }
+  function prune() {
+    while (list.children.length > MAX_CARDS) {
+      const gone = list.lastChild;
+      const id = parseInt(gone.dataset.id || "0", 10);
+      const key = idKey.get(id);
+      idKey.delete(id);
+      if (kmap && key && mapLayers.has(key) && mapLayers.get(key).id === id) {
+        mapGroup.removeLayer(mapLayers.get(key).layer); mapLayers.delete(key);
+      }
+      list.removeChild(gone);
+    }
+  }
+  function fitOnce() {
+    if (kmap && !mapFitted && mapLayers.size) {
+      mapFitted = true;
+      kmap.fitBounds(mapGroup.getBounds().pad(0.2), { maxZoom: 15 });
+    }
   }
 
   function add(messages) {
@@ -66,9 +112,22 @@
       if (seen.has(m.id)) continue;
       seen.add(m.id);
       list.insertBefore(card(m, loaded), list.firstChild);
+      plot(m, loaded);
     }
-    while (list.children.length > MAX_CARDS) list.removeChild(list.lastChild);
+    prune();
+    fitOnce();
     empty.hidden = list.children.length > 0;
+  }
+
+  // A card we already show got its location (looked up a moment after it arrived).
+  function update(messages) {
+    for (const m of messages) {
+      const old = list.querySelector('[data-id="' + m.id + '"]');
+      if (!old) continue;
+      list.replaceChild(card(m, false), old);
+      plot(m, true);
+    }
+    fitOnce();
   }
 
   function setStatus(ok, text) {
@@ -84,6 +143,7 @@
     ws.onmessage = function (ev) {
       const data = JSON.parse(ev.data);
       if (data.type === "messages") { add(data.messages); loaded = true; }
+      else if (data.type === "update") update(data.messages);
       else if (data.type === "status") setStatus(data.decoder === "up", data.decoder === "up" ? "Receiving" : "Receiver offline");
     };
     ws.onclose = function (ev) {

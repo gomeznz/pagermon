@@ -525,6 +525,7 @@ def test_personal_alert_webhook(app, tmp_path):
     try:
         d = Decoder.__new__(Decoder)
         d.conn = conn
+        d.loc_cfg, d.loc_worker = {}, None
         d.dedupe_seconds = 0
         d.recent = {}
         d.load_rules()
@@ -536,4 +537,57 @@ def test_personal_alert_webhook(app, tmp_path):
         dec.send_webhook = orig
         conn.execute("UPDATE users SET notify_url = '' WHERE id = ?", (vid,))
     assert [p["capcode"] for u, p in sent] == ["1500"] and sent[0][1]["user"] == "viewer1"
+    conn.close()
+
+
+def test_locations_on_live_history_map(app):
+    conn = db.connect()
+    now = time.time()
+    m1 = conn.execute("INSERT INTO messages (ts, channel_name, protocol, capcode, msg_type, message) "
+                      "VALUES (?, 'T', 'POCSAG1200', '1500', 'alpha', 'FIRE 115 YARROW ST')", (now,)).lastrowid
+    m2 = conn.execute("INSERT INTO messages (ts, channel_name, protocol, capcode, msg_type, message) "
+                      "VALUES (?, 'T', 'POCSAG1200', '9999', 'alpha', 'FIRE KEW RD')", (now,)).lastrowid
+    for mid, prec, rad in ((m1, "point", 0), (m2, "area", 600)):
+        conn.execute("INSERT INTO message_locations (message_id, lat, lon, radius_m, precision, label, display, created) "
+                     "VALUES (?, -46.41, 168.35, ?, ?, 'Somewhere', '', ?)", (mid, rad, prec, now))
+    v = TestClient(app)
+    login(v, "viewer1", "a brand new password")   # can see 1000-1999, 5555 only
+    data = v.get("/api/map", params={"hours": 1}).json()
+    ids = [m["id"] for m in data["messages"]]
+    assert m1 in ids and m2 not in ids                      # map respects the capcode filter
+    loc = next(m for m in data["messages"] if m["id"] == m1)["loc"]
+    assert loc["precision"] == "point" and loc["lat"] == -46.41
+    assert 'href="/map?focus=%d"' % m1 in v.get("/history").text
+    assert v.get("/map").status_code == 200
+    # admin settings + tester (with a fake geocoder)
+    a = TestClient(app)
+    login(a, "alex")
+    tok = csrf_of(a.get("/config").text)
+    a.post("/config/locations", data={"csrf": tok, "loc_enabled": "1", "loc_region": "Invercargill",
+                                      "loc_countries": "nz", "loc_markers": "LOC:, @",
+                                      "map_tiles": "https://tile.openstreetmap.org/{z}/{x}/{y}.png"})
+    assert db.get_setting(conn, "loc_enabled") == "1" and db.get_setting(conn, "loc_region") == "Invercargill"
+    from app.locations import Geocoder
+    orig = Geocoder._http
+    Geocoder._http = lambda self, url: [{"lat": "-46.4", "lon": "168.3", "display_name": "x",
+                                         "address": {"house_number": "12"}, "boundingbox": ["-46.41", "-46.39", "168.29", "168.31"]}]
+    try:
+        page = a.post("/config/locations/test", data={"csrf": tok, "sample": "HOUSE FIRE 12 TEST ST"}).text
+    finally:
+        Geocoder._http = orig
+    assert "Exact address" in page and "number 12" in page
+    # live websocket sends an update when a location arrives after the page
+    with a.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
+        ws.receive_json(); ws.receive_json()
+        m3 = conn.execute("INSERT INTO messages (ts, channel_name, protocol, capcode, msg_type, message) "
+                          "VALUES (?, 'T', 'POCSAG1200', '1501', 'alpha', 'later')", (time.time(),)).lastrowid
+        got = ws.receive_json()
+        assert got["type"] == "messages" and got["messages"][-1]["loc"] is None
+        conn.execute("INSERT INTO message_locations (message_id, lat, lon, radius_m, precision, label, display, created) "
+                     "VALUES (?, -46.4, 168.3, 0, 'point', 'Later St', '', ?)", (m3, time.time()))
+        for _ in range(5):
+            got = ws.receive_json()
+            if got["type"] == "update":
+                break
+        assert got["type"] == "update" and got["messages"][0]["loc"]["label"] == "Later St"
     conn.close()

@@ -13,6 +13,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+import urllib.parse
 from urllib.parse import quote, urlencode
 
 from fastapi import FastAPI, Form, Request, WebSocket, WebSocketDisconnect
@@ -23,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import __version__, auth, db, rules as kwrules, settings
+from . import __version__, auth, db, locations, rules as kwrules, settings
 from .decoder import VALID_PROTOCOLS
 
 BASE = Path(__file__).parent
@@ -164,8 +165,11 @@ def message_query(user: dict, f: dict) -> tuple[str, list]:
 
 MSG_SELECT = (
     "SELECT m.*, a.id AS alias_id, a.label AS alias, COALESCE(a.alert, 0) AS cap_alert, "
-    "COALESCE(a.suppress, 0) AS cap_suppress, COALESCE(a.colour, '') AS cap_colour "
+    "COALESCE(a.suppress, 0) AS cap_suppress, COALESCE(a.colour, '') AS cap_colour, "
+    "l.lat AS loc_lat, l.lon AS loc_lon, l.radius_m AS loc_radius, l.precision AS loc_precision, "
+    "l.label AS loc_label, l.display AS loc_display "
     "FROM messages m LEFT JOIN aliases a ON a.capcode = m.capcode "
+    "LEFT JOIN message_locations l ON l.message_id = m.id "
 )
 
 
@@ -186,6 +190,9 @@ def msg_dict(row, view) -> dict:
     d["p_keyword_ids"] = res.personal_keyword_ids
     d["p_alias_id"] = res.personal_alias_id
     d["spans"] = [list(s) for s in res.spans]
+    lat = d.pop("loc_lat", None)
+    loc = {k: d.pop("loc_" + k, None) for k in ("lon", "radius", "precision", "label", "display")}
+    d["loc"] = dict(loc, lat=lat) if lat is not None else None
     return d
 
 
@@ -218,7 +225,7 @@ def create_app() -> FastAPI:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; img-src 'self' data:; style-src 'self'; "
+            f"default-src 'self'; img-src 'self' data: https: {_tile_origin()}; style-src 'self'; "
             "script-src 'self'; connect-src 'self'; frame-ancestors 'none'; "
             "form-action 'self'; base-uri 'none'"
         )
@@ -339,6 +346,37 @@ def create_app() -> FastAPI:
                     still_allowed=lambda: load_user(conn, websocket.session) is not None,
                     load_view=lambda: kwrules.load_view(conn, user["id"]))
 
+    @app.get("/map", response_class=HTMLResponse)
+    async def map_page(request: Request, focus: int = 0):
+        conn, user = require_user(request)
+        try:
+            cfg = {k: db.get_setting(conn, k, v) for k, v in locations.DEFAULTS.items()}
+            return render(request, "map.html", user, cfg=cfg, focus=focus, page_name="map")
+        finally:
+            conn.close()
+
+    @app.get("/api/map")
+    async def api_map(request: Request, hours: int = 24, after: int = 0, focus: int = 0,
+                      suppressed: int = 0):
+        conn, user = require_user(request)
+        try:
+            where, args = message_query(user, {})
+            hours = max(1, min(hours, 24 * 30))
+            sql = MSG_SELECT + f"WHERE {where} AND l.id IS NOT NULL AND (m.ts > ? OR m.id = ?)"
+            params = args + [time.time() - hours * 3600, focus]
+            if after:
+                sql += " AND l.id > ?"
+                params.append(after)
+            rows = conn.execute(sql + " ORDER BY m.id DESC LIMIT 500", params).fetchall()
+            view = kwrules.load_view(conn, user["id"])
+            msgs = [msg_dict(r, view) for r in rows]
+            if not suppressed:
+                msgs = [m for m in msgs if not m["suppressed"] or m["id"] == focus]
+            last = conn.execute("SELECT COALESCE(MAX(id), 0) FROM message_locations").fetchone()[0]
+            return {"messages": msgs, "last": last}
+        finally:
+            conn.close()
+
     @app.get("/history", response_class=HTMLResponse)
     async def history(request: Request, q: str = "", capcode: str = "", protocol: str = "",
                       channel: str = "", start: str = "", end: str = "", page: int = 1):
@@ -399,9 +437,13 @@ def create_app() -> FastAPI:
     # --- configuration (admin) --------------------------------------------
 
     @app.get("/config", response_class=HTMLResponse)
-    async def config(request: Request, edit: int = 0):
+    async def config(request: Request, edit: int = 0, loc_test: dict | None = None):
         conn, user = require_user(request, admin=True)
         try:
+            loc = {k: db.get_setting(conn, k, v) for k, v in locations.DEFAULTS.items()}
+            loc_stats = conn.execute("SELECT COUNT(*) AS n, SUM(precision = 'point') AS pts "
+                                     "FROM message_locations WHERE created > ?",
+                                     (time.time() - 86400,)).fetchone()
             channels = conn.execute("SELECT * FROM channels ORDER BY name").fetchall()
             editing = None
             if edit:
@@ -415,8 +457,8 @@ def create_app() -> FastAPI:
             base_url = str(request.base_url).rstrip("/")
             return render(request, "config.html", user, channels=channels, editing=editing,
                           s=s, protocols=VALID_PROTOCOLS, kiosks=kiosks, base_url=base_url,
-                          personal_kiosks=personal_kiosks,
-                          page_name="config")
+                          personal_kiosks=personal_kiosks, loc=loc, loc_stats=loc_stats,
+                          loc_test=loc_test, page_name="config")
         finally:
             conn.close()
 
@@ -522,6 +564,73 @@ def create_app() -> FastAPI:
         finally:
             conn.close()
 
+    @app.post("/config/locations")
+    async def save_locations(request: Request, csrf: str = Form(""), loc_enabled: str = Form(""),
+                             loc_geocoder: str = Form(""), loc_countries: str = Form(""),
+                             loc_region: str = Form(""), loc_markers: str = Form(""),
+                             loc_email: str = Form(""), map_tiles: str = Form(""),
+                             map_attribution: str = Form("")):
+        check_csrf(request, csrf)
+        conn, user = require_user(request, admin=True)
+        try:
+            vals = {
+                "loc_enabled": "1" if loc_enabled else "0",
+                "loc_geocoder": loc_geocoder.strip() or locations.DEFAULTS["loc_geocoder"],
+                "loc_countries": re.sub(r"[^a-z,]", "", loc_countries.lower())[:40],
+                "loc_region": " ".join(loc_region.split())[:60],
+                "loc_markers": loc_markers.strip()[:200],
+                "loc_email": loc_email.strip()[:120],
+                "map_tiles": map_tiles.strip() or locations.DEFAULTS["map_tiles"],
+                "map_attribution": map_attribution.strip()[:200] or locations.DEFAULTS["map_attribution"],
+            }
+            for key in ("loc_geocoder", "map_tiles"):
+                if not re.match(r"^https?://[^\s]+$", vals[key]):
+                    flash(request, "The geocoder and map tile addresses must start with http:// or https://", "error")
+                    return back("/config#locations")
+            if "{z}" not in vals["map_tiles"] or "{x}" not in vals["map_tiles"] or "{y}" not in vals["map_tiles"]:
+                flash(request, "The map tile address needs {z}, {x} and {y} in it.", "error")
+                return back("/config#locations")
+            with db.transaction(conn):
+                for k, v in vals.items():
+                    db.set_setting(conn, k, v)
+                db.bump_rules_version(conn)
+                db.audit(conn, user["username"], "locations_update",
+                         f"enabled={vals['loc_enabled']} region={vals['loc_region'] or '-'}")
+            flash(request, "Location settings saved." + (" New pages with an address will appear on the Map."
+                                                          if vals["loc_enabled"] == "1" else ""))
+            return back("/config#locations")
+        finally:
+            conn.close()
+
+    @app.post("/config/locations/test", response_class=HTMLResponse)
+    async def test_location(request: Request, csrf: str = Form(""), sample: str = Form("")):
+        check_csrf(request, csrf)
+        conn, user = require_user(request, admin=True)
+        try:
+            cfg = {k: db.get_setting(conn, k, v) for k, v in locations.DEFAULTS.items()}
+        finally:
+            conn.close()
+        sample = sample.strip()[:500]
+        ext = locations.extract(sample, cfg["loc_markers"])
+        result, error = None, ""
+        if ext:
+            try:
+                result = await asyncio.to_thread(locations.resolve, sample, cfg,
+                                                 locations.Geocoder(db.connect, cfg))
+            except Exception as exc:
+                error = f"Lookup failed: {exc}"[:200]
+        found = ""
+        if ext and ext.kind == "coords":
+            found = f"coordinates {ext.lat}, {ext.lon}"
+        elif ext and ext.kind == "street":
+            found = (f"{'number ' + ext.number + ', ' if ext.number else 'no number, '}street "
+                     f"\u201c{ext.street_words[0]} {ext.street_type}\u201d".rstrip() +
+                     (f", locality \u201c{ext.locality}\u201d" if ext.locality else ""))
+        elif ext:
+            found = f"place \u201c{ext.text}\u201d"
+        return await config(request, loc_test={"sample": sample, "found": found, "result": result,
+                                               "error": error})
+
     @app.post("/config/settings")
     async def save_settings(request: Request, csrf: str = Form(""), retention_days: str = Form("30"),
                             dedupe_seconds: str = Form("0"), webhook_url: str = Form("")):
@@ -567,7 +676,7 @@ def create_app() -> FastAPI:
     @app.post("/config/kiosk")
     async def create_kiosk(request: Request, csrf: str = Form(""), name: str = Form(""),
                            capcode_filter: str = Form(""), theme: str = Form("dark"),
-                           hide_tone: str = Form(""), mode: str = Form("all")):
+                           hide_tone: str = Form(""), mode: str = Form("all"), show_map: str = Form("")):
         check_csrf(request, csrf)
         conn, user = require_user(request, admin=True)
         try:
@@ -581,10 +690,11 @@ def create_app() -> FastAPI:
             theme = theme if theme in ("dark", "light", "auto") else "dark"
             with db.transaction(conn):
                 conn.execute(
-                    "INSERT INTO kiosks (name, token, capcode_filter, theme, hide_tone, mode, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO kiosks (name, token, capcode_filter, theme, hide_tone, mode, show_map, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (name, secrets.token_urlsafe(24), capcode_filter.strip(), theme,
-                     1 if hide_tone else 0, mode if mode in ("all", "forwarded") else "all", time.time()))
+                     1 if hide_tone else 0, mode if mode in ("all", "forwarded") else "all",
+                     1 if show_map else 0, time.time()))
                 db.audit(conn, user["username"], "kiosk_create", name)
             flash(request, f"Kiosk \u201c{name}\u201d created. Open its link on the display.")
             return back("/config#kiosks")
@@ -594,7 +704,7 @@ def create_app() -> FastAPI:
     @app.post("/config/kiosk/{kid}/edit")
     async def edit_kiosk(request: Request, kid: int, csrf: str = Form(""), name: str = Form(""),
                          capcode_filter: str = Form(""), theme: str = Form("dark"),
-                         hide_tone: str = Form(""), mode: str = Form("all")):
+                         hide_tone: str = Form(""), mode: str = Form("all"), show_map: str = Form("")):
         check_csrf(request, csrf)
         conn, user = require_user(request, admin=True)
         try:
@@ -605,8 +715,9 @@ def create_app() -> FastAPI:
             theme = theme if theme in ("dark", "light", "auto") else "dark"
             mode = mode if mode in ("all", "forwarded") else "all"
             with db.transaction(conn):
-                conn.execute("UPDATE kiosks SET name=?, capcode_filter=?, theme=?, hide_tone=?, mode=? "
-                             "WHERE id=?", (name, capcode_filter.strip(), theme, 1 if hide_tone else 0, mode, kid))
+                conn.execute("UPDATE kiosks SET name=?, capcode_filter=?, theme=?, hide_tone=?, mode=?, show_map=? "
+                             "WHERE id=?", (name, capcode_filter.strip(), theme, 1 if hide_tone else 0, mode,
+                                            1 if show_map else 0, kid))
                 db.audit(conn, user["username"], "kiosk_edit", f"{name} mode={mode} theme={theme}")
             flash(request, f"Saved kiosk \u201c{name}\u201d. Open screens pick up the change within ten seconds; a new theme shows after the screen reloads.")
             return back("/config#kiosks")
@@ -649,8 +760,9 @@ def create_app() -> FastAPI:
                                     "<h1>This kiosk link isn't valid any more.</h1>"
                                     "<p>Ask an admin for a new link.</p>", status_code=404)
             conn.execute("UPDATE kiosks SET last_seen = ? WHERE id = ?", (time.time(), k["id"]))
+            cfg = {key: db.get_setting(conn, key, v) for key, v in locations.DEFAULTS.items()}
             response = templates.TemplateResponse(
-                request, "kiosk.html", {"k": k, "version": __version__})
+                request, "kiosk.html", {"k": k, "version": __version__, "cfg": cfg})
             response.headers["Referrer-Policy"] = "no-referrer"
             return response
         finally:
@@ -889,7 +1001,7 @@ def create_app() -> FastAPI:
     @app.post("/my/kiosk")
     async def my_create_kiosk(request: Request, csrf: str = Form(""), name: str = Form(""),
                               capcode_filter: str = Form(""), theme: str = Form("dark"),
-                              hide_tone: str = Form(""), mode: str = Form("all")):
+                              hide_tone: str = Form(""), mode: str = Form("all"), show_map: str = Form("")):
         check_csrf(request, csrf)
         conn, user = require_user(request)
         try:
@@ -905,10 +1017,10 @@ def create_app() -> FastAPI:
                 return back("/my/kiosks")
             with db.transaction(conn):
                 conn.execute(
-                    "INSERT INTO kiosks (name, token, capcode_filter, theme, hide_tone, mode, owner_id, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO kiosks (name, token, capcode_filter, theme, hide_tone, mode, show_map, owner_id, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (f["name"], secrets.token_urlsafe(24), f["capcode_filter"], f["theme"],
-                     1 if hide_tone else 0, f["mode"], user["id"], time.time()))
+                     1 if hide_tone else 0, f["mode"], 1 if show_map else 0, user["id"], time.time()))
                 db.audit(conn, user["username"], "my_kiosk_create", f["name"])
             flash(request, f"Kiosk \u201c{f['name']}\u201d created. Open its link on the display.")
             return back("/my/kiosks")
@@ -918,7 +1030,7 @@ def create_app() -> FastAPI:
     @app.post("/my/kiosk/{kid}/edit")
     async def my_edit_kiosk(request: Request, kid: int, csrf: str = Form(""), name: str = Form(""),
                             capcode_filter: str = Form(""), theme: str = Form("dark"),
-                            hide_tone: str = Form(""), mode: str = Form("all")):
+                            hide_tone: str = Form(""), mode: str = Form("all"), show_map: str = Form("")):
         check_csrf(request, csrf)
         conn, user = require_user(request)
         try:
@@ -929,8 +1041,9 @@ def create_app() -> FastAPI:
                 flash(request, problem, "error")
                 return back("/my/kiosks")
             with db.transaction(conn):
-                conn.execute("UPDATE kiosks SET name=?, capcode_filter=?, theme=?, hide_tone=?, mode=? WHERE id=?",
-                             (f["name"], f["capcode_filter"], f["theme"], 1 if hide_tone else 0, f["mode"], kid))
+                conn.execute("UPDATE kiosks SET name=?, capcode_filter=?, theme=?, hide_tone=?, mode=?, show_map=? WHERE id=?",
+                             (f["name"], f["capcode_filter"], f["theme"], 1 if hide_tone else 0, f["mode"],
+                              1 if show_map else 0, kid))
             flash(request, f"Saved kiosk \u201c{f['name']}\u201d.")
             return back("/my/kiosks")
         finally:
@@ -1489,6 +1602,27 @@ def _route_summary(conn) -> dict[tuple[str, int], list[dict]]:
     return out
 
 
+_tile_cache = {"at": 0.0, "origin": ""}
+
+
+def _tile_origin() -> str:
+    """Origin of the configured map tile server, for the page security policy (cached 10 s)."""
+    now = time.time()
+    if now - _tile_cache["at"] > 10:
+        _tile_cache["at"] = now
+        try:
+            conn = db.connect()
+            try:
+                url = db.get_setting(conn, "map_tiles", locations.DEFAULTS["map_tiles"])
+            finally:
+                conn.close()
+            p = urllib.parse.urlsplit(url)
+            _tile_cache["origin"] = f"{p.scheme}://{p.netloc}" if p.scheme in ("http", "https") and p.netloc else ""
+        except Exception:
+            _tile_cache["origin"] = ""
+    return _tile_cache["origin"]
+
+
 def _post_json(url: str, payload: dict) -> str | None:
     """POST JSON; returns an error description, or None on success."""
     import json
@@ -1531,6 +1665,7 @@ async def _feed(websocket: WebSocket, conn, where: str, args: list, still_allowe
         ).fetchall()[::-1]
         last_id = rows[-1]["id"] if rows else (
             conn.execute("SELECT COALESCE(MAX(id), 0) FROM messages").fetchone()[0])
+        last_loc = conn.execute("SELECT COALESCE(MAX(id), 0) FROM message_locations").fetchone()[0]
         await websocket.send_json({"type": "messages", "messages": ready(rows, rules)})
         if with_status:
             await websocket.send_json({"type": "status", **status_payload(conn)})
@@ -1555,6 +1690,18 @@ async def _feed(websocket: WebSocket, conn, where: str, args: list, still_allowe
             else:
                 last_id = max(last_id, conn.execute(
                     "SELECT COALESCE(MAX(id), 0) FROM messages").fetchone()[0])
+            # Pages whose location was looked up since the last tick: resend them as updates.
+            new_locs = conn.execute("SELECT id, message_id FROM message_locations WHERE id > ? "
+                                    "ORDER BY id LIMIT 200", (last_loc,)).fetchall()
+            if new_locs:
+                last_loc = new_locs[-1]["id"]
+                ids = [r["message_id"] for r in new_locs]
+                marks = ",".join("?" * len(ids))
+                rows = conn.execute(MSG_SELECT + f"WHERE {where} AND m.id IN ({marks})",
+                                    args + ids).fetchall()
+                msgs = ready(rows, rules)
+                if msgs:
+                    await websocket.send_json({"type": "update", "messages": msgs})
             if with_status and ticks % 5 == 0:
                 await websocket.send_json({"type": "status", **status_payload(conn)})
     except (WebSocketDisconnect, RuntimeError):

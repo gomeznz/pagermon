@@ -38,7 +38,7 @@
         <td>{{ m.channel_name }}</td>
         <td><span class="proto">{{ m.protocol }}</span>{% if m.function %}<span class="fn">{{ m.function }}</span>{% endif %}</td>
         <td class="cap"><a class="cap-link" href="{{ '/capcodes' if user.role == 'admin' else '/my' }}?edit={{ m.capcode }}#capcode-form" title="Label, alert or suppress">{{ m.capcode }}</a>{% if m.alias %}<span class="alias">{{ m.alias }}</span>{% endif %}{% if m.alert %}<span class="tag alert-tag">alert</span>{% endif %}{% if m.suppressed %}<span class="tag warn sup-tag">suppressed</span>{% endif %}</td>
-        <td class="msg">{% if m.message %}{% for text, hit, col in m.segments %}{% if hit %}<mark class="kw{% if col %} c-{{ col }}{% endif %}">{{ text }}</mark>{% else %}{{ text }}{% endif %}{% endfor %}{% else %}<span class="muted">({{ m.msg_type }})</span>{% endif %}</td>
+        <td class="msg">{% if m.message %}{% for text, hit, col in m.segments %}{% if hit %}<mark class="kw{% if col %} c-{{ col }}{% endif %}">{{ text }}</mark>{% else %}{{ text }}{% endif %}{% endfor %}{% else %}<span class="muted">({{ m.msg_type }})</span>{% endif %}{% if m.loc %}<a class="loc-chip loc-{{ m.loc.precision }}" href="/map?focus={{ m.id }}" title="{{ m.loc.display or 'Show on the map' }}">📍 {{ m.loc.label }}{% if m.loc.precision != 'point' %}<span class="loc-radius">area ≈{{ (m.loc.radius / 1000)|round(1) ~ ' km' if m.loc.radius >= 1000 else m.loc.radius ~ ' m' }}</span>{% endif %}</a>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>

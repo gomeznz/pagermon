@@ -142,3 +142,32 @@ body.idle .k-fs { opacity: 0; pointer-events: none; }
   .k-name, .k-status span:last-child, #k-date { display: none; }
   .k-proto { margin-left: 0; width: 100%; }
 }
+
+/* Location line and optional map */
+.k-body { flex: 1; display: flex; min-height: 0; }
+.k-body .k-list { flex: 1; }
+body.with-map .k-body .k-list { flex: 0 0 46%; }
+.k-map { flex: 1; margin: clamp(0.6rem, 1.2vh, 1rem) clamp(1rem, 2vw, 2rem) clamp(0.6rem, 1.2vh, 1rem) 0;
+  border-radius: 10px; border: 1px solid var(--line); z-index: 0; background: var(--surface); }
+body.with-map .k-msg { font-size: clamp(1rem, 1.6vw, 1.8rem); }
+.k-loc { margin-top: 0.35rem; font-weight: 600; font-size: clamp(0.9rem, 1.2vw, 1.25rem); color: var(--accent); display: flex; gap: 0.6rem; align-items: baseline; flex-wrap: wrap; }
+.k-loc-radius { font-weight: 450; color: var(--muted); font-size: 0.85em; }
+@media (max-width: 900px) {
+  .k-body { flex-direction: column; }
+  body.with-map .k-body .k-list { flex: 1 1 50%; }
+  .k-map { margin: 0 1rem 1rem; min-height: 40vh; }
+}
+
+/* Map popups (shared by the Map page and kiosks) */
+.mpp-pop { font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #1b1f1d; min-width: 200px; }
+.mpp-pop-head { display: flex; gap: 0.4rem; align-items: baseline; flex-wrap: wrap; }
+.mpp-pop-cap { font-family: ui-monospace, Menlo, Consolas, monospace; color: #5f6762; font-size: 12px; }
+.mpp-pop-alert { background: #dc2626; color: #fff; font-weight: 700; font-size: 10px; letter-spacing: 0.06em; padding: 0 0.35rem; border-radius: 4px; }
+.mpp-pop-time { color: #5f6762; font-size: 12px; margin: 0.1rem 0 0.35rem; }
+.mpp-pop-msg { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; white-space: pre-wrap; word-break: break-word; }
+.mpp-pop-loc { margin-top: 0.45rem; font-weight: 600; display: flex; flex-direction: column; }
+.mpp-pop-prec { font-weight: 400; color: #5f6762; font-size: 12px; }
+.mpp-pop-display { color: #5f6762; font-size: 11.5px; margin-top: 0.2rem; }
+.leaflet-interactive.mpp-alert { animation: mpp-pulse 1.4s ease-in-out infinite; }
+@keyframes mpp-pulse { 50% { stroke-opacity: 0.25; stroke-width: 7px; } }
+@media (prefers-reduced-motion: reduce) { .leaflet-interactive.mpp-alert { animation: none; } }

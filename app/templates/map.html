@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Map · MultipagePlus{% endblock %}
+{% block main_class %}page wide map-main{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css?v=1.9.4">
+<div class="map-head">
+  <h1>Map</h1>
+  <div class="toolbar map-toolbar">
+    <select id="map-hours" aria-label="Time window">
+      <option value="1">Last hour</option>
+      <option value="6">Last 6 hours</option>
+      <option value="24" selected>Last 24 hours</option>
+      <option value="168">Last 7 days</option>
+      <option value="720">Last 30 days</option>
+    </select>
+    <label class="check"><input type="checkbox" id="map-suppressed"> Show suppressed</label>
+    <span class="count" id="map-count"></span>
+  </div>
+</div>
+{% if cfg.loc_enabled != '1' %}
+<div class="flash flash-error">Location lookups are turned off{% if user.role == 'admin' %}. Turn them on under <a href="/config#locations">Config &rarr; Locations</a>{% else %}. Ask an admin to turn them on{% endif %}. Pages already looked up still show here.</div>
+{% endif %}
+<div class="map-wrap">
+  <div id="map" class="map" data-tiles="{{ cfg.map_tiles }}" data-attribution="{{ cfg.map_attribution }}" data-focus="{{ focus }}"></div>
+  <aside class="map-list" aria-label="Pages with a location">
+    <ol id="map-list"></ol>
+    <p class="empty" id="map-empty">No pages with a location in this time window.</p>
+  </aside>
+</div>
+<p class="muted small map-legend"><span class="lg-pin"></span> exact address &nbsp; <span class="lg-area"></span> area (no house or RAPID number) &nbsp; <span class="lg-alert"></span> alert</p>
+{% endblock %}
+{% block scripts %}<script src="/static/vendor/leaflet/leaflet.js?v=1.9.4"></script><script src="/static/maplib.js?v={{ version }}"></script><script src="/static/map.js?v={{ version }}"></script>{% endblock %}

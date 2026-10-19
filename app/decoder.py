@@ -28,7 +28,7 @@ import urllib.request
 from collections import deque
 
 from . import db, settings
-from . import auth, rules as kwrules
+from . import auth, locations, rules as kwrules
 from .parser import Page, parse_line
 
 log = logging.getLogger("pager.decoder")
@@ -223,6 +223,8 @@ class Decoder:
         self.keyword_rules: list = []
         self.personal: list = []
         self.rules_version = ""
+        self.loc_cfg: dict = {}
+        self.loc_worker = None
         self.dedupe_seconds = 0
         self.webhook_url = ""
         self.recent: dict[tuple[str, str], float] = {}
@@ -240,6 +242,15 @@ class Decoder:
             for r in self.conn.execute("SELECT * FROM aliases")
         }
         self.keyword_rules = kwrules.load_rules(self.conn)
+        # Location lookups: settings are shared with the worker thread, which has its own connection.
+        cfg = {k: db.get_setting(self.conn, k, v) for k, v in locations.DEFAULTS.items()}
+        if not hasattr(self, "loc_cfg"):
+            self.loc_cfg, self.loc_worker = {}, None
+        self.loc_cfg.clear()
+        self.loc_cfg.update(cfg)
+        if self.loc_cfg.get("loc_enabled") == "1" and self.loc_worker is None:
+            self.loc_worker = locations.LocationWorker(db.connect, self.loc_cfg)
+            self.loc_worker.start()
         # Users with their own alert webhook: (user row, their personal view, parsed filter)
         self.personal = []
         for u in self.conn.execute(
@@ -300,6 +311,9 @@ class Decoder:
             "updated_at = ? WHERE channel_id = ?",
             (ts, ts, ch["id"]),
         )
+        if (self.loc_worker and self.loc_cfg.get("loc_enabled") == "1"
+                and page.msg_type in ("alpha", "other") and page.message):
+            self.loc_worker.enqueue(cur.lastrowid, page.message)
         alias = self.aliases.get(page.capcode) or {}
         res = kwrules.evaluate(page.message, self.keyword_rules,
                                alias.get("alert", 0), alias.get("suppress", 0))
@@ -360,6 +374,8 @@ class Decoder:
         if days > 0:
             cutoff = time.time() - days * 86400
             n = self.conn.execute("DELETE FROM messages WHERE ts < ?", (cutoff,)).rowcount
+            self.conn.execute("DELETE FROM message_locations WHERE message_id NOT IN (SELECT id FROM messages)")
+            self.conn.execute("DELETE FROM geocode_cache WHERE ts < ?", (time.time() - 90 * 86400,))
             self.conn.execute("DELETE FROM audit WHERE ts < ?", (time.time() - 365 * 86400,))
             if n:
                 log.info("retention: purged %d message(s) older than %d days", n, days)

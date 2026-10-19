@@ -24,6 +24,7 @@ RTL-SDR ─▶ rtl_fm ─▶ multimon-ng ─▶ decoder service ─▶ SQLite �
 - **Keyword rules** (admins, on the Capcodes page): words or phrases in the message text that trigger an alert, are suppressed, or get a colour, on any capcode. Matches are highlighted in the message. Whole-word or anywhere matching, case-insensitive. Alerts always win over suppression, and a keyword's colour beats the capcode's. Webhook alerts include the matched keywords.
 - **Kiosk displays** (admins create them on Config): a full-screen, read-only live view for a wall screen, opened from its own secret link with no sign-in. Large text, a clock, and alert pages that pulse red. Each kiosk can have its own capcode filter and theme. Links can be disabled, replaced or removed at any time, which cuts off open screens within seconds.
 - **My capcodes** and **My kiosks** (every user): **My capcodes** has the same layout as the admin Capcodes page, for personal capcode labels, colours, alerts and suppression and personal keywords. **My kiosks** holds personal kiosks and a personal alert webhook (e.g. an ntfy topic). They sit on top of the shared rules and only change that user's own view. A user's admin-set capcode filter is always the outer limit, including on their kiosks. Admins set how many personal kiosks each user may have (Users page) and can disable or remove any of them (Config). Live has a **Notify me** option for browser pop-ups on alert pages (needs HTTPS, e.g. via Cloudflare Tunnel).
+- **Locations and map** (turn on under Config → Locations): addresses in page text are looked up and shown on a **Map** page, on Live/History as a 📍 chip, and optionally on kiosks. A house, RAPID or property number gives a pin; a street, suburb or town on its own gives a shaded area circle.
 - **Debug console** (admins): opened from Config in its own tab. Shows every raw line multimon-ng sends, rtl_fm and multimon-ng error output, and pipeline start/stop events, live. Lines that couldn't be parsed are highlighted, and the log can be filtered, paused, cleared or downloaded. The last 5,000 lines are kept.
 - **Access control**: argon2-hashed passwords, admin and viewer roles, and optional per-user capcode filters (e.g. `1234567, 2000000-2000099`). Includes login lockout after 5 failures, CSRF protection, and sign-out of other sessions on password change. An **audit log** records sign-ins, config changes, user changes and exports.
 - Runs as two hardened systemd services under an unprivileged `pager` user.
@@ -107,6 +108,16 @@ chromium --kiosk --noerrdialogs --disable-infobars --incognito "http://<pi-addre
 ```
 
 The page keeps the screen awake where the browser allows it, hides the mouse pointer when idle, and reconnects on its own after network or receiver restarts.
+
+## Locations and map
+
+Turn on **Config → Locations & map**, set a **default town or region** (used when a page names a street but no town), and paste one of your pages into **Try it** to check what's found.
+
+- **Exact address** (pin): coordinates in the text, or an address whose house / RAPID / property number the geocoder knows (e.g. `115 YARROW ST INVERCARGILL`, `RAPID 1234 MAIN SOUTH RD`, `2/34 DEE ST`).
+- **Area** (shaded circle sized to the street): a street with no number, or a number the map doesn't know (`SCRUB FIRE NORTH RD LORNEVILLE`, `SH1 EDENDALE`).
+- **Town / place** (larger circle): just a suburb, town or place (`LOC: BLUFF WHARF`).
+
+Addresses are found by street type (St, Rd, Ave, Cres, Tce, Hwy, SH1…), or after a marker word such as `LOC:` or `@` if your pages use one (configurable). Lookups use OpenStreetMap's Nominatim service by default, which in New Zealand includes LINZ addresses with rural RAPID numbers. They're cached and limited to one a second, as Nominatim's usage policy requires, and happen in the background so decoding never waits. **Turning lookups on sends the address part of matching pages to that service**; point the geocoder setting at your own Nominatim server if you'd rather nothing leaves your network. Map tiles come from OpenStreetMap by default (also configurable). The map library (Leaflet) is bundled with the app.
 
 ## Alert webhook
 

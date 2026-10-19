@@ -71,8 +71,33 @@
     const msg = el("td", "msg");
     if (m.message) appendHighlighted(msg, m.message, m.spans || []);
     else msg.appendChild(el("span", "muted", "(" + m.msg_type + ")"));
+    if (m.loc) msg.appendChild(locChip(m));
     tr.appendChild(msg);
+    tr.dataset.id = m.id;
     return tr;
+  }
+
+  function locChip(m) {
+    const a = el("a", "loc-chip loc-" + m.loc.precision, "📍 " + m.loc.label);
+    a.href = "/map?focus=" + encodeURIComponent(m.id);
+    if (m.loc.precision !== "point") {
+      const r = m.loc.radius >= 1000 ? (m.loc.radius / 1000).toFixed(1) + " km" : m.loc.radius + " m";
+      a.appendChild(el("span", "loc-radius", "area ≈" + r));
+    }
+    a.title = m.loc.display || "Show on the map";
+    return a;
+  }
+
+  // A page we already show got its location: redraw that row in place.
+  function update(messages) {
+    for (const m of messages) {
+      const old = tbody.querySelector('tr[data-id="' + m.id + '"]');
+      if (!old) continue;
+      const tr = row(m);
+      tr.hidden = old.hidden;
+      tbody.replaceChild(tr, old);
+    }
+    applyFilters();
   }
 
   function visible(tr) {
@@ -182,6 +207,8 @@
         if (paused && loaded) { buffered = buffered.concat(data.messages); applyFilters(); }
         else add(data.messages, loaded);
         loaded = true;
+      } else if (data.type === "update") {
+        update(data.messages);
       } else if (data.type === "status") {
         showStatus(data);
       }
