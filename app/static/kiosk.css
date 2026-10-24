@@ -171,3 +171,10 @@ body.with-map .k-msg { font-size: clamp(1rem, 1.6vw, 1.8rem); }
 .leaflet-interactive.mpp-alert { animation: mpp-pulse 1.4s ease-in-out infinite; }
 @keyframes mpp-pulse { 50% { stroke-opacity: 0.25; stroke-width: 7px; } }
 @media (prefers-reduced-motion: reduce) { .leaflet-interactive.mpp-alert { animation: none; } }
+
+/* Service icon (capcode marked Fire / Police / Ambulance) */
+.k-svc { width: clamp(1.4rem, 2.2vw, 2.1rem); height: clamp(1.4rem, 2.2vw, 2.1rem); flex: none; align-self: center;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,.25)); }
+.k-svc-fire { color: #ef4444; }
+.k-svc-police { color: #3b82f6; }
+.k-svc-ambulance { color: #22c55e; }

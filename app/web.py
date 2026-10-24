@@ -42,6 +42,7 @@ PERSONAL_SCOPE = {"personal": True, "scope": "personal", "title": "My capcodes",
 
 COLOURS = ("red", "orange", "amber", "lime", "green", "teal",
            "cyan", "blue", "indigo", "purple", "pink", "grey")
+SERVICES = {"fire": "Fire", "police": "Police", "ambulance": "Ambulance"}
 ALLOWED_ARG_RE = re.compile(r"^[A-Za-z0-9 .:=_+,/-]*$")
 DEVICE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
 
@@ -124,7 +125,7 @@ def render(request: Request, name: str, user: dict | None, **ctx) -> HTMLRespons
     return templates.TemplateResponse(
         request, name,
         {"user": user, "csrf": request.session.get("csrf", ""), "flashes": messages,
-         "version": __version__, **ctx},
+         "version": __version__, "services": SERVICES, **ctx},
     )
 
 
@@ -166,6 +167,7 @@ def message_query(user: dict, f: dict) -> tuple[str, list]:
 MSG_SELECT = (
     "SELECT m.*, a.id AS alias_id, a.label AS alias, COALESCE(a.alert, 0) AS cap_alert, "
     "COALESCE(a.suppress, 0) AS cap_suppress, COALESCE(a.colour, '') AS cap_colour, "
+    "COALESCE(a.service, '') AS cap_service, "
     "l.lat AS loc_lat, l.lon AS loc_lon, l.radius_m AS loc_radius, l.precision AS loc_precision, "
     "l.label AS loc_label, l.display AS loc_display "
     "FROM messages m LEFT JOIN aliases a ON a.capcode = m.capcode "
@@ -185,6 +187,9 @@ def msg_dict(row, view) -> dict:
     d["alert"] = int(res.alert)
     d["suppressed"] = int(res.suppressed)
     d["colour"] = res.colour
+    shared_service = d.pop("cap_service", "")
+    personal = view.personal_caps.get(d["capcode"]) if getattr(view, "personal_caps", None) else None
+    d["service"] = (personal or {}).get("service") or shared_service or ""
     d["keywords"] = res.keywords
     d["keyword_ids"] = res.shared_keyword_ids
     d["p_keyword_ids"] = res.personal_keyword_ids
@@ -194,6 +199,20 @@ def msg_dict(row, view) -> dict:
     loc = {k: d.pop("loc_" + k, None) for k in ("lon", "radius", "precision", "label", "display")}
     d["loc"] = dict(loc, lat=lat) if lat is not None else None
     return d
+
+
+def _set_service(conn, table: str, row, service: str) -> str:
+    """Quick-set a capcode's service. Picking the current one again clears it.
+
+    A blank label, or one that was just the old service name, follows the service.
+    """
+    new = service if service in SERVICES and service != row["service"] else ""
+    label = row["label"] or ""
+    if not label or label == SERVICES.get(row["service"], ""):
+        label = SERVICES.get(new, "")
+    conn.execute(f"UPDATE {table} SET service = ?, label = ? WHERE id = ?", (new, label, row["id"]))
+    db.bump_rules_version(conn)
+    return new
 
 
 # --- app ----------------------------------------------------------------
@@ -912,7 +931,7 @@ def create_app() -> FastAPI:
     @app.post("/my/capcode")
     async def my_save_capcode(request: Request, csrf: str = Form(""), capcode: str = Form(""),
                               label: str = Form(""), alert: str = Form(""), suppress: str = Form(""),
-                              colour: str = Form("")):
+                              colour: str = Form(""), service: str = Form("")):
         check_csrf(request, csrf)
         conn, user = require_user(request)
         try:
@@ -926,6 +945,8 @@ def create_app() -> FastAPI:
                 return back("/my")
             label = label.strip()[:60]
             colour = colour if colour in COLOURS else ""
+            service = service if service in SERVICES else ""
+            label = label or SERVICES.get(service, "")
             sup = 1 if suppress else 0
             al = 0 if sup else (1 if alert else 0)
             has_routes = any(k.startswith("kiosk_") and v for k, v in (await request.form()).multi_items())
@@ -934,10 +955,11 @@ def create_app() -> FastAPI:
                 return back("/my")
             with db.transaction(conn):
                 conn.execute(
-                    "INSERT INTO user_aliases (user_id, capcode, label, alert, suppress, colour) "
-                    "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, capcode) DO UPDATE SET "
+                    "INSERT INTO user_aliases (user_id, capcode, label, alert, suppress, colour, service) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, capcode) DO UPDATE SET "
                     "label = excluded.label, alert = excluded.alert, suppress = excluded.suppress, "
-                    "colour = excluded.colour", (user["id"], capcode, label, al, sup, colour))
+                    "colour = excluded.colour, service = excluded.service",
+                    (user["id"], capcode, label, al, sup, colour, service))
                 rid = conn.execute("SELECT id FROM user_aliases WHERE user_id = ? AND capcode = ?",
                                    (user["id"], capcode)).fetchone()["id"]
                 await _save_my_routes(request, conn, user["id"], "capcode", rid)
@@ -1050,11 +1072,18 @@ def create_app() -> FastAPI:
             conn.close()
 
     @app.post("/my/{kind}/{rid}/{action}")
-    async def my_rule_action(request: Request, kind: str, rid: int, action: str, csrf: str = Form("")):
+    async def my_rule_action(request: Request, kind: str, rid: int, action: str, csrf: str = Form(""),
+                             service: str = Form("")):
         check_csrf(request, csrf)
         conn, user = require_user(request)
         try:
             uid = user["id"]
+            if kind == "capcode" and action == "service":
+                row = conn.execute("SELECT * FROM user_aliases WHERE id = ? AND user_id = ?", (rid, uid)).fetchone()
+                if row:
+                    with db.transaction(conn):
+                        _set_service(conn, "user_aliases", row, service)
+                return back("/my")
             if kind in ("capcode", "keyword") and action in ("suppress", "delete"):
                 table = "user_aliases" if kind == "capcode" else "user_keywords"
                 row = conn.execute(f"SELECT * FROM {table} WHERE id = ? AND user_id = ?", (rid, uid)).fetchone()
@@ -1200,7 +1229,7 @@ def create_app() -> FastAPI:
     @app.post("/config/alias")
     async def save_alias(request: Request, csrf: str = Form(""), capcode: str = Form(""),
                          label: str = Form(""), alert: str = Form(""),
-                         suppress: str = Form(""), colour: str = Form("")):
+                         suppress: str = Form(""), colour: str = Form(""), service: str = Form("")):
         check_csrf(request, csrf)
         conn, user = require_user(request, admin=True)
         try:
@@ -1210,6 +1239,8 @@ def create_app() -> FastAPI:
                 flash(request, "Enter a numeric capcode.", "error")
                 return back("/capcodes")
             colour = colour if colour in COLOURS else ""
+            service = service if service in SERVICES else ""
+            label = label or SERVICES.get(service, "")
             has_routes = any(k.startswith("kiosk_") and v for k, v in (await request.form()).multi_items())
             if not label and not suppress and not colour and not has_routes:
                 flash(request, "Give the capcode a label, colour, kiosk setting, or tick Suppress.", "error")
@@ -1219,15 +1250,17 @@ def create_app() -> FastAPI:
             al = 0 if sup else (1 if alert else 0)  # a suppressed capcode never alerts
             with db.transaction(conn):
                 conn.execute(
-                    "INSERT INTO aliases (capcode, label, alert, suppress, colour) VALUES (?, ?, ?, ?, ?) "
-                    "ON CONFLICT(capcode) DO UPDATE SET label = excluded.label, "
-                    "alert = excluded.alert, suppress = excluded.suppress, colour = excluded.colour",
-                    (capcode, label, al, sup, colour))
+                    "INSERT INTO aliases (capcode, label, alert, suppress, colour, service) "
+                    "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(capcode) DO UPDATE SET label = excluded.label, "
+                    "alert = excluded.alert, suppress = excluded.suppress, colour = excluded.colour, "
+                    "service = excluded.service",
+                    (capcode, label, al, sup, colour, service))
                 db.bump_rules_version(conn)
                 db.audit(conn, user["username"], "alias_save",
                          f"{capcode} = {label or '(no label)'}"
                          f"{' alert' if al else ''}{' suppressed' if sup else ''}"
-                         f"{' colour=' + colour if colour else ''}")
+                         f"{' colour=' + colour if colour else ''}"
+                         f"{' service=' + service if service else ''}")
             aid = conn.execute("SELECT id FROM aliases WHERE capcode = ?", (capcode,)).fetchone()["id"]
             with db.transaction(conn):
                 routes = await _save_routes(request, conn, "capcode", aid)
@@ -1313,6 +1346,20 @@ def create_app() -> FastAPI:
                     db.bump_rules_version(conn)
                     db.audit(conn, user["username"], "keyword_delete", row["keyword"])
             return back("/capcodes#keywords")
+        finally:
+            conn.close()
+
+    @app.post("/config/alias/{aid}/service")
+    async def set_alias_service(request: Request, aid: int, csrf: str = Form(""), service: str = Form("")):
+        check_csrf(request, csrf)
+        conn, user = require_user(request, admin=True)
+        try:
+            row = conn.execute("SELECT * FROM aliases WHERE id = ?", (aid,)).fetchone()
+            if row:
+                with db.transaction(conn):
+                    new = _set_service(conn, "aliases", row, service)
+                    db.audit(conn, user["username"], "alias_service", f"{row['capcode']} = {new or '(none)'}")
+            return back("/capcodes")
         finally:
             conn.close()
 

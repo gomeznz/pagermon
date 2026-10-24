@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS aliases (
     label    TEXT NOT NULL,
     alert    INTEGER NOT NULL DEFAULT 0,
     suppress INTEGER NOT NULL DEFAULT 0,
-    colour   TEXT NOT NULL DEFAULT ''
+    colour   TEXT NOT NULL DEFAULT '',
+    service  TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -101,6 +102,7 @@ CREATE TABLE IF NOT EXISTS user_aliases (
     alert    INTEGER NOT NULL DEFAULT 0,
     suppress INTEGER NOT NULL DEFAULT 0,
     colour   TEXT NOT NULL DEFAULT '',
+    service  TEXT NOT NULL DEFAULT '',
     UNIQUE (user_id, capcode)
 );
 
@@ -262,6 +264,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN notify_url TEXT NOT NULL DEFAULT ''")
     if "colour" not in cols:
         conn.execute("ALTER TABLE aliases ADD COLUMN colour TEXT NOT NULL DEFAULT ''")
+    if "service" not in cols:  # '', fire, police or ambulance
+        conn.execute("ALTER TABLE aliases ADD COLUMN service TEXT NOT NULL DEFAULT ''")
+    uacols = {r["name"] for r in conn.execute("PRAGMA table_info(user_aliases)")}
+    if uacols and "service" not in uacols:
+        conn.execute("ALTER TABLE user_aliases ADD COLUMN service TEXT NOT NULL DEFAULT ''")
 
 
 def get_setting(conn: sqlite3.Connection, key: str, default: str = "") -> str:

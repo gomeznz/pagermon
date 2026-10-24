@@ -9,6 +9,27 @@
     </fieldset>
 {% endmacro %}
 
+{% macro svc_icon(svc, cls='') %}<svg class="svc svc-{{ svc }}{{ ' ' ~ cls if cls }}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/services.svg#svc-{{ svc }}"/></svg>{% endmacro %}
+
+{% macro service_quick(row, url, csrf, services) %}
+    <form method="post" action="{{ url }}/{{ row.id }}/service" class="svc-quick" aria-label="Service for {{ row.capcode }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% for key, name in services.items() %}
+      <button name="service" value="{{ key }}" class="svc-btn{% if row.service == key %} is-on{% endif %}" title="{{ 'Clear ' ~ name if row.service == key else 'Label as ' ~ name }}" aria-pressed="{{ 'true' if row.service == key else 'false' }}">{{ svc_icon(key) }}<span class="visually-hidden">{{ name }}</span></button>
+      {% endfor %}
+    </form>
+{% endmacro %}
+
+{% macro service_pick(cur, services) %}
+    <fieldset class="svc-pick">
+      <legend>Service</legend>
+      <label class="svc-opt none"><input type="radio" name="service" value="" {% if not cur %}checked{% endif %}><span>None</span></label>
+      {% for key, name in services.items() %}
+      <label class="svc-opt"><input type="radio" name="service" value="{{ key }}" {% if cur == key %}checked{% endif %}><span>{{ svc_icon(key) }}{{ name }}</span></label>
+      {% endfor %}
+    </fieldset>
+{% endmacro %}
+
 {% macro kiosk_routes(current, opts, scope) %}
     <fieldset class="kiosk-routes">
       <legend>{{ 'My kiosks' if scope == 'personal' else 'Kiosks' }}</legend>

@@ -5,17 +5,18 @@
 <h1>{{ sc.title }}</h1>
 <section class="card" id="aliases">
     {% if sc.personal %}
-    <p class="muted">Your own capcode settings. Label capcodes you know and give them a <strong>colour</strong> to pick them out on the Live and History screens. Tick <strong>Alert me</strong> to be notified of their pages (set up under <a href="/my/kiosks#my-alerts">My kiosks &rarr; Alerts</a>), or <strong>Suppress</strong> to hide a noisy capcode from your Live screen. These only change what <strong>you</strong> see and your own kiosks; they sit on top of the shared settings.{% if user.capcode_filter %} You can see capcodes <span class="mono">{{ user.capcode_filter }}</span>.{% endif %}</p>
+    <p class="muted">Your own capcode settings. Label capcodes you know and give them a <strong>colour</strong> to pick them out on the Live and History screens. Mark capcodes as Fire, Police or Ambulance under <strong>Service</strong> to get the matching icon on your kiosks. Tick <strong>Alert me</strong> to be notified of their pages (set up under <a href="/my/kiosks#my-alerts">My kiosks &rarr; Alerts</a>), or <strong>Suppress</strong> to hide a noisy capcode from your Live screen. These only change what <strong>you</strong> see and your own kiosks; they sit on top of the shared settings.{% if user.capcode_filter %} You can see capcodes <span class="mono">{{ user.capcode_filter }}</span>.{% endif %}</p>
     {% else %}
-    <p class="muted">Label capcodes you know, such as your own test pagers, and give them a <strong>colour</strong> to pick them out on the Live and History screens. Tick <strong>Alert</strong> to send their pages to the webhook, or <strong>Suppress</strong> to hide a noisy capcode from the Live screen. Suppressed pages are still recorded and can be shown with <em>Show suppressed</em>. Use the <strong>Kiosks</strong> settings to forward, alert or suppress a capcode's pages on particular kiosk displays. These are the shared settings everyone sees; users can add their own under My capcodes.</p>
+    <p class="muted">Label capcodes you know, such as your own test pagers, and give them a <strong>colour</strong> to pick them out on the Live and History screens. Use the <strong>Service</strong> buttons to mark a capcode as Fire, Police or Ambulance in one click; kiosks show the matching icon on its pages. Tick <strong>Alert</strong> to send their pages to the webhook, or <strong>Suppress</strong> to hide a noisy capcode from the Live screen. Suppressed pages are still recorded and can be shown with <em>Show suppressed</em>. Use the <strong>Kiosks</strong> settings to forward, alert or suppress a capcode's pages on particular kiosk displays. These are the shared settings everyone sees; users can add their own under My capcodes.</p>
     {% endif %}
   <div class="table-wrap">
     <table class="capcode-table">
-      <thead><tr><th>Capcode</th><th>Label</th><th>Alert</th><th>Suppressed</th><th>Pages</th><th>Last seen</th><th>Kiosks</th><th></th></tr></thead>
+      <thead><tr><th>Capcode</th><th>Label</th><th>Service</th><th>Alert</th><th>Suppressed</th><th>Pages</th><th>Last seen</th><th>Kiosks</th><th></th></tr></thead>
       <tbody>
       {% for a in aliases %}
         <tr class="{% if a.suppress %}suppressed-row{% endif %}{% if a.colour %} c-{{ a.colour }}{% endif %}">
-          <td class="mono"><span class="swatch-dot" aria-hidden="true"></span>{{ a.capcode }}</td><td>{{ a.label or '' }}{% if a.shared_label and a.shared_label != a.label %}<span class="small muted shared-label">shared: {{ a.shared_label }}</span>{% endif %}</td>
+          <td class="mono"><span class="swatch-dot" aria-hidden="true"></span>{{ a.capcode }}</td><td>{% if a.service %}{{ mx.svc_icon(a.service, 'svc-inline') }}{% endif %}{{ a.label or '' }}{% if a.shared_label and a.shared_label != a.label %}<span class="small muted shared-label">shared: {{ a.shared_label }}</span>{% endif %}</td>
+          <td>{{ mx.service_quick(a, sc.capcode_url, csrf, services) }}</td>
           <td>{% if a.alert %}<span class="tag ok">on</span>{% endif %}</td>
           <td>{% if a.suppress %}<span class="tag warn">suppressed</span>{% endif %}</td>
           <td class="mono">{{ a.pages }}</td>
@@ -34,7 +35,7 @@
           </td>
         </tr>
       {% else %}
-        <tr><td colspan="8" class="muted">No capcodes yet. Add one below.</td></tr>
+        <tr><td colspan="9" class="muted">No capcodes yet. Add one below.</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -46,6 +47,7 @@
     <input name="label" placeholder="{{ 'My label (optional)' if sc.personal else 'Label (optional if suppressing)' }}" maxlength="60" aria-label="Label" value="{{ e.label if e else '' }}">
     <label class="check"><input type="checkbox" name="alert" value="1" {% if e and e.alert %}checked{% endif %}> {{ sc.alert_word }}</label>
     <label class="check"><input type="checkbox" name="suppress" value="1" {% if e and e.suppress %}checked{% endif %}> Suppress</label>
+    {{ mx.service_pick(e.service if e else '', services) }}
     {{ mx.swatches(e.colour if e else '', colours) }}
     {{ mx.kiosk_routes(e_routes, kiosk_opts, sc.scope) }}
     <div class="form-actions"><button class="primary">Save</button>

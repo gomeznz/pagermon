@@ -44,11 +44,29 @@
     return p;
   }
 
+  const SERVICES = { fire: "Fire", police: "Police", ambulance: "Ambulance" };
+  function serviceIcon(svc) {
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("class", "k-svc k-svc-" + svc);
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", SERVICES[svc]);
+    const t = document.createElementNS(NS, "title");
+    t.textContent = SERVICES[svc];
+    svg.appendChild(t);
+    const use = document.createElementNS(NS, "use");
+    use.setAttribute("href", "/static/services.svg#svc-" + svc);
+    svg.appendChild(use);
+    return svg;
+  }
+
   function card(m, fresh) {
     const a = el("article", "k-card" + colourClass(m.colour) + (m.alert ? " is-alert" : "") + (fresh ? " is-new" : ""));
     const head = el("div", "k-head");
     head.appendChild(el("span", "k-time", (m.time || "").slice(11)));
     const who = el("span", "k-who");
+    if (SERVICES.hasOwnProperty(m.service)) who.appendChild(serviceIcon(m.service));
     who.appendChild(el("span", "k-alias", m.alias || m.capcode));
     if (m.alias) who.appendChild(el("span", "k-cap", m.capcode));
     head.appendChild(who);

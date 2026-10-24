@@ -591,3 +591,66 @@ def test_locations_on_live_history_map(app):
                 break
         assert got["type"] == "update" and got["messages"][0]["loc"]["label"] == "Later St"
     conn.close()
+
+
+def test_capcode_service_quick_label(app):
+    c = TestClient(app)
+    login(c, "alex")
+    conn = db.connect()
+    conn.execute("DELETE FROM aliases WHERE capcode IN ('1500', '9999')")
+    token = csrf_of(c.get("/capcodes").text)
+    # saving with only a service labels the capcode after it
+    c.post("/config/alias", data={"csrf": token, "capcode": "1500", "service": "ambulance"})
+    row = conn.execute("SELECT * FROM aliases WHERE capcode='1500'").fetchone()
+    assert row["service"] == "ambulance" and row["label"] == "Ambulance"
+    # one-click switch: the auto label follows; a custom label is kept
+    c.post(f"/config/alias/{row['id']}/service", data={"csrf": token, "service": "fire"})
+    row = conn.execute("SELECT * FROM aliases WHERE capcode='1500'").fetchone()
+    assert row["service"] == "fire" and row["label"] == "Fire"
+    conn.execute("UPDATE aliases SET label = 'Station 41' WHERE id = ?", (row["id"],))
+    c.post(f"/config/alias/{row['id']}/service", data={"csrf": token, "service": "police"})
+    row = conn.execute("SELECT * FROM aliases WHERE capcode='1500'").fetchone()
+    assert row["service"] == "police" and row["label"] == "Station 41"
+    msgs = {m["capcode"]: m for m in c.get("/api/messages").json()["messages"]}
+    assert msgs["1500"]["service"] == "police" and msgs["5555"]["service"] in ("", None)
+    page = c.get("/capcodes").text
+    assert "services.svg#svc-police" in page and 'aria-pressed="true"' in page
+    # picking the current service again clears it; junk values never stick
+    c.post(f"/config/alias/{row['id']}/service", data={"csrf": token, "service": "police"})
+    assert conn.execute("SELECT service FROM aliases WHERE id=?", (row["id"],)).fetchone()[0] == ""
+    c.post(f"/config/alias/{row['id']}/service", data={"csrf": token, "service": "evil\"><x>"})
+    assert conn.execute("SELECT service FROM aliases WHERE id=?", (row["id"],)).fetchone()[0] == ""
+    # personal service overrides the shared one, only for that user
+    v = TestClient(app)
+    login(v, "viewer1", "a brand new password")
+    vt = csrf_of(v.get("/my").text)
+    c.post(f"/config/alias/{row['id']}/service", data={"csrf": token, "service": "fire"})
+    v.post("/my/capcode", data={"csrf": vt, "capcode": "1500", "service": "ambulance"})
+    vm = {m["capcode"]: m for m in v.get("/api/messages").json()["messages"]}
+    am = {m["capcode"]: m for m in c.get("/api/messages").json()["messages"]}
+    assert vm["1500"]["service"] == "ambulance" and am["1500"]["service"] == "fire"
+    uid = conn.execute("SELECT id FROM user_aliases WHERE capcode='1500'").fetchone()[0]
+    v.post(f"/my/capcode/{uid}/service", data={"csrf": vt, "service": "ambulance"})
+    vm = {m["capcode"]: m for m in v.get("/api/messages").json()["messages"]}
+    assert vm["1500"]["service"] == "fire"   # cleared personal → shared shows through
+    # viewers can't change the shared setting
+    assert v.post(f"/config/alias/{row['id']}/service", data={"csrf": vt, "service": "police"}).status_code == 403
+    conn.close()
+
+
+def test_migration_adds_service_column(tmp_path, monkeypatch):
+    import sqlite3
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript("CREATE TABLE aliases (id INTEGER PRIMARY KEY, capcode TEXT NOT NULL UNIQUE, "
+                      "label TEXT NOT NULL, alert INTEGER NOT NULL DEFAULT 0);"
+                      "CREATE TABLE user_aliases (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, "
+                      "capcode TEXT NOT NULL, label TEXT NOT NULL DEFAULT '');")
+    old.close()
+    monkeypatch.setattr(db.settings, "DB_PATH", str(path), raising=False)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    db._migrate(conn)
+    assert "service" in {r["name"] for r in conn.execute("PRAGMA table_info(aliases)")}
+    assert "service" in {r["name"] for r in conn.execute("PRAGMA table_info(user_aliases)")}
+    conn.close()
