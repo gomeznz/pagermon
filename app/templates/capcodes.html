@@ -16,7 +16,7 @@
       {% for a in aliases %}
         <tr class="{% if a.suppress %}suppressed-row{% endif %}{% if a.colour %} c-{{ a.colour }}{% endif %}">
           <td class="mono"><span class="swatch-dot" aria-hidden="true"></span>{{ a.capcode }}</td><td>{% if a.service %}{{ mx.svc_icon(a.service, 'svc-inline') }}{% endif %}{{ a.label or '' }}{% if a.shared_label and a.shared_label != a.label %}<span class="small muted shared-label">shared: {{ a.shared_label }}</span>{% endif %}</td>
-          <td>{{ mx.service_quick(a, sc.capcode_url, csrf, services) }}</td>
+          <td>{{ mx.service_quick(a, sc.capcode_url, csrf, services, a.capcode) }}</td>
           <td>{% if a.alert %}<span class="tag ok">on</span>{% endif %}</td>
           <td>{% if a.suppress %}<span class="tag warn">suppressed</span>{% endif %}</td>
           <td class="mono">{{ a.pages }}</td>
@@ -57,15 +57,16 @@
 
 <section class="card" id="keywords">
   <h2>Keywords</h2>
-  <p class="muted">{% if sc.personal %}Your own keywords, matched in the message text of any page you can see.{% else %}Match words or phrases in the message text, on any capcode.{% endif %} A keyword can <strong>Alert</strong>, be <strong>Suppressed</strong>, or just get a <strong>colour</strong>; matches are highlighted in the message. Matching ignores case and, by default, only matches whole words (&ldquo;fire&rdquo; won't match &ldquo;firewall&rdquo;). Alerts always win: a page that alerts, by capcode or keyword, is never hidden on the Live screen. A keyword's colour takes priority over the capcode's. Both capcodes and keywords can also forward, alert or suppress pages on specific kiosks.</p>
+  <p class="muted">{% if sc.personal %}Your own keywords, matched in the message text of any page you can see.{% else %}Match words or phrases in the message text, on any capcode.{% endif %} A keyword can <strong>Alert</strong>, be <strong>Suppressed</strong>, mark the page as <strong>Fire, Police or Ambulance</strong> for the kiosk icon, or just get a <strong>colour</strong>; matches are highlighted in the message. Matching ignores case and, by default, only matches whole words (&ldquo;fire&rdquo; won't match &ldquo;firewall&rdquo;). Alerts always win: a page that alerts, by capcode or keyword, is never hidden on the Live screen. A keyword's colour and service take priority over the capcode's. Both capcodes and keywords can also forward, alert or suppress pages on specific kiosks.</p>
   <div class="table-wrap">
     <table class="capcode-table keyword-table">
-      <thead><tr><th>Keyword</th><th>Match</th><th>Alert</th><th>Suppressed</th><th>Kiosks</th><th></th></tr></thead>
+      <thead><tr><th>Keyword</th><th>Match</th><th>Service</th><th>Alert</th><th>Suppressed</th><th>Kiosks</th><th></th></tr></thead>
       <tbody>
       {% for w in keywords %}
         <tr class="{% if w.suppress %}suppressed-row{% endif %}{% if w.colour %} c-{{ w.colour }}{% endif %}">
-          <td><span class="swatch-dot" aria-hidden="true"></span><mark class="kw">{{ w.keyword }}</mark></td>
+          <td><span class="swatch-dot" aria-hidden="true"></span>{% if w.service %}{{ mx.svc_icon(w.service, 'svc-inline') }}{% endif %}<mark class="kw">{{ w.keyword }}</mark></td>
           <td class="small">{{ 'whole word' if w.match == 'word' else 'anywhere' }}</td>
+          <td>{{ mx.service_quick(w, sc.keyword_url, csrf, services, w.keyword) }}</td>
           <td>{% if w.alert %}<span class="tag ok">on</span>{% endif %}</td>
           <td>{% if w.suppress %}<span class="tag warn">suppressed</span>{% endif %}</td>
           <td class="routes-cell">{{ mx.route_chips(routes.get(('keyword', w.id), [])) }}</td>
@@ -82,7 +83,7 @@
           </td>
         </tr>
       {% else %}
-        <tr><td colspan="6" class="muted">No keywords yet. Add one below.</td></tr>
+        <tr><td colspan="7" class="muted">No keywords yet. Add one below.</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -98,6 +99,7 @@
     </select>
     <label class="check"><input type="checkbox" name="alert" value="1" {% if k and k.alert %}checked{% endif %}> {{ sc.alert_word }}</label>
     <label class="check"><input type="checkbox" name="suppress" value="1" {% if k and k.suppress %}checked{% endif %}> Suppress</label>
+    {{ mx.service_pick(k.service if k else '', services) }}
     {{ mx.swatches(k.colour if k else '', colours) }}
     {{ mx.kiosk_routes(k_routes, kiosk_opts, sc.scope) }}
     <div class="form-actions"><button class="primary">Save</button>

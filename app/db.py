@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS user_keywords (
     alert    INTEGER NOT NULL DEFAULT 0,
     suppress INTEGER NOT NULL DEFAULT 0,
     colour   TEXT NOT NULL DEFAULT '',
+    service  TEXT NOT NULL DEFAULT '',
     UNIQUE (user_id, keyword)
 );
 
@@ -143,7 +144,8 @@ CREATE TABLE IF NOT EXISTS keywords (
     match    TEXT NOT NULL DEFAULT 'word' CHECK (match IN ('word', 'contains')),
     alert    INTEGER NOT NULL DEFAULT 0,
     suppress INTEGER NOT NULL DEFAULT 0,
-    colour   TEXT NOT NULL DEFAULT ''
+    colour   TEXT NOT NULL DEFAULT '',
+    service  TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS message_locations (
@@ -269,6 +271,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     uacols = {r["name"] for r in conn.execute("PRAGMA table_info(user_aliases)")}
     if uacols and "service" not in uacols:
         conn.execute("ALTER TABLE user_aliases ADD COLUMN service TEXT NOT NULL DEFAULT ''")
+    for table in ("keywords", "user_keywords"):
+        kwcols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if kwcols and "service" not in kwcols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN service TEXT NOT NULL DEFAULT ''")
 
 
 def get_setting(conn: sqlite3.Connection, key: str, default: str = "") -> str:

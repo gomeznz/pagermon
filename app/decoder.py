@@ -316,13 +316,14 @@ class Decoder:
             self.loc_worker.enqueue(cur.lastrowid, page.message)
         alias = self.aliases.get(page.capcode) or {}
         res = kwrules.evaluate(page.message, self.keyword_rules,
-                               alias.get("alert", 0), alias.get("suppress", 0))
+                               alias.get("alert", 0), alias.get("suppress", 0),
+                               alias.get("colour", ""), alias.get("service", "") or "")
         if res.alert and self.webhook_url:
             payload = {
                 "id": cur.lastrowid, "ts": ts, "channel": ch["name"],
                 "freq_hz": ch["freq_hz"], "protocol": page.protocol,
                 "capcode": page.capcode, "alias": alias.get("label", ""),
-                "keywords": res.keywords,
+                "keywords": res.keywords, "service": res.service,
                 "type": page.msg_type, "message": page.message,
             }
             threading.Thread(
@@ -334,12 +335,12 @@ class Decoder:
                 continue
             shown = kwrules.apply_view(page.message, page.capcode, view, alias.get("alert", 0),
                                        alias.get("suppress", 0), alias.get("colour", ""),
-                                       alias.get("label", ""))
+                                       alias.get("label", ""), alias.get("service", "") or "")
             if shown.personal_alert:
                 payload = {
                     "id": cur.lastrowid, "ts": ts, "channel": ch["name"], "user": u["username"],
                     "protocol": page.protocol, "capcode": page.capcode, "alias": shown.label,
-                    "keywords": shown.keywords, "type": page.msg_type, "message": page.message,
+                    "keywords": shown.keywords, "service": shown.service, "type": page.msg_type, "message": page.message,
                 }
                 threading.Thread(target=send_webhook, args=(u["notify_url"], payload), daemon=True).start()
 

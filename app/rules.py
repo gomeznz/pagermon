@@ -10,6 +10,8 @@ How a page's settings are worked out:
                  hidden
   * colour     — the first matching keyword that has a colour, otherwise the
                  capcode's colour
+  * service    — Fire / Police / Ambulance, chosen the same way as colour:
+                 the first matching keyword with a service, else the capcode's
 Keywords are case-insensitive and match whole words by default ("fire" does
 not match "firewall"); a rule can be switched to match anywhere instead.
 Matching applies to past pages as well as new ones, like capcode settings.
@@ -31,6 +33,7 @@ class Rule:
     suppress: bool
     colour: str
     pattern: re.Pattern = field(repr=False)
+    service: str = ""
 
 
 @dataclass
@@ -38,6 +41,7 @@ class Result:
     alert: bool = False
     suppressed: bool = False
     colour: str = ""
+    service: str = ""
     keywords: list[str] = field(default_factory=list)
     keyword_ids: list[int] = field(default_factory=list)
     spans: list[tuple[int, int, str]] = field(default_factory=list)  # start, end, colour
@@ -52,6 +56,7 @@ def compile_rule(row) -> Rule:
         id=row["id"], keyword=kw, match=row["match"], alert=bool(row["alert"]),
         suppress=bool(row["suppress"]), colour=row["colour"] or "",
         pattern=re.compile(body, re.IGNORECASE),
+        service=(row["service"] if "service" in row.keys() else "") or "",
     )
 
 
@@ -60,10 +65,10 @@ def load_rules(conn: sqlite3.Connection) -> list[Rule]:
 
 
 def evaluate(message: str, rules: list[Rule], cap_alert: bool = False,
-             cap_suppress: bool = False, cap_colour: str = "") -> Result:
+             cap_suppress: bool = False, cap_colour: str = "", cap_service: str = "") -> Result:
     res = Result()
     kw_alert = kw_suppress = False
-    kw_colour = ""
+    kw_colour = kw_service = ""
     if message and rules:
         for rule in rules:
             hits = list(rule.pattern.finditer(message))
@@ -75,11 +80,14 @@ def evaluate(message: str, rules: list[Rule], cap_alert: bool = False,
             kw_suppress |= rule.suppress
             if rule.colour and not kw_colour:
                 kw_colour = rule.colour
+            if rule.service and not kw_service:
+                kw_service = rule.service
             for m in hits:
                 res.spans.append((m.start(), m.end(), rule.colour))
     res.alert = bool(cap_alert or kw_alert)
     res.suppressed = bool((cap_suppress or kw_suppress) and not res.alert)
     res.colour = kw_colour or cap_colour or ""
+    res.service = kw_service or cap_service or ""
     res.spans = _merge(res.spans)
     return res
 
@@ -151,6 +159,7 @@ def kiosk_decision(kiosk_id: int, routes: dict, alias_id, keyword_ids, *, in_fil
 # shared ones and only change what *they* see (and their own kiosks):
 #   * label    — the personal label if set, else the shared one
 #   * colour   — personal colour (keyword first, then capcode), else shared colour
+#   * service  — the same order as colour
 #   * alert    — shared alert OR personal alert
 #   * suppress — shared or personal suppression, unless the page alerts
 # Shared kiosks and the shared webhook only ever use the shared rules.
@@ -169,6 +178,7 @@ class Shown:
     colour: str
     label: str
     keywords: list
+    service: str
     spans: list
     shared_keyword_ids: list
     personal_keyword_ids: list
@@ -188,10 +198,11 @@ def load_view(conn: sqlite3.Connection, user_id: int | None = None) -> View:
 
 
 def apply_view(message: str, capcode: str, view: View, cap_alert=0, cap_suppress=0,
-               cap_colour: str = "", cap_label: str = "") -> Shown:
-    s = evaluate(message, view.shared, cap_alert, cap_suppress, cap_colour)
+               cap_colour: str = "", cap_label: str = "", cap_service: str = "") -> Shown:
+    s = evaluate(message, view.shared, cap_alert, cap_suppress, cap_colour, cap_service)
     pc = view.personal_caps.get(capcode) or {}
-    p = evaluate(message, view.personal, pc.get("alert", 0), pc.get("suppress", 0), pc.get("colour", ""))
+    p = evaluate(message, view.personal, pc.get("alert", 0), pc.get("suppress", 0), pc.get("colour", ""),
+                 pc.get("service", "") or "")
     alert = s.alert or p.alert
     keywords = list(dict.fromkeys(s.keywords + p.keywords))
     return Shown(
@@ -200,6 +211,7 @@ def apply_view(message: str, capcode: str, view: View, cap_alert=0, cap_suppress
         colour=p.colour or s.colour,
         label=pc.get("label") or cap_label or "",
         keywords=keywords,
+        service=p.service or s.service,
         spans=_merge(s.spans + p.spans),
         shared_keyword_ids=s.keyword_ids,
         personal_keyword_ids=p.keyword_ids,

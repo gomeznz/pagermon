@@ -654,3 +654,47 @@ def test_migration_adds_service_column(tmp_path, monkeypatch):
     assert "service" in {r["name"] for r in conn.execute("PRAGMA table_info(aliases)")}
     assert "service" in {r["name"] for r in conn.execute("PRAGMA table_info(user_aliases)")}
     conn.close()
+
+
+def test_keyword_service(app):
+    c = TestClient(app)
+    login(c, "alex")
+    conn = db.connect()
+    conn.execute("DELETE FROM keywords")
+    conn.execute("INSERT INTO messages (ts, channel_name, protocol, capcode, msg_type, message) "
+                 "VALUES (?, 'Test', 'POCSAG1200', '1501', 'alpha', 'STRUCTURE FIRE MAIN ST')", (time.time(),))
+    token = csrf_of(c.get("/capcodes").text)
+    # a keyword with only a service is enough to save
+    c.post("/config/keyword", data={"csrf": token, "keyword": "structure fire", "match": "word", "service": "fire"})
+    kw = conn.execute("SELECT * FROM keywords WHERE keyword='structure fire'").fetchone()
+    assert kw["service"] == "fire"
+    msgs = {m["capcode"]: m for m in c.get("/api/messages").json()["messages"]}
+    assert msgs["1501"]["service"] == "fire"
+    # the keyword's service beats the capcode's
+    c.post("/config/alias", data={"csrf": token, "capcode": "1501", "label": "Mixed", "service": "police"})
+    msgs = {m["capcode"]: m for m in c.get("/api/messages").json()["messages"]}
+    assert msgs["1501"]["service"] == "fire"
+    page = c.get("/capcodes").text
+    assert f'/config/keyword/{kw["id"]}/service' in page
+    # quick toggle off → capcode's service shows through; junk ignored
+    c.post(f"/config/keyword/{kw['id']}/service", data={"csrf": token, "service": "fire"})
+    assert conn.execute("SELECT service FROM keywords WHERE id=?", (kw["id"],)).fetchone()[0] == ""
+    msgs = {m["capcode"]: m for m in c.get("/api/messages").json()["messages"]}
+    assert msgs["1501"]["service"] == "police"
+    c.post(f"/config/keyword/{kw['id']}/service", data={"csrf": token, "service": "<b>"})
+    assert conn.execute("SELECT service FROM keywords WHERE id=?", (kw["id"],)).fetchone()[0] == ""
+    # personal keyword service wins for that user only
+    v = TestClient(app)
+    login(v, "viewer1", "a brand new password")
+    vt = csrf_of(v.get("/my").text)
+    v.post("/my/keyword", data={"csrf": vt, "keyword": "main st", "match": "word", "service": "ambulance"})
+    uk = conn.execute("SELECT * FROM user_keywords WHERE keyword='main st'").fetchone()
+    assert uk["service"] == "ambulance"
+    assert f'/my/keyword/{uk["id"]}/service' in v.get("/my").text
+    vm = {m["capcode"]: m for m in v.get("/api/messages").json()["messages"]}
+    am = {m["capcode"]: m for m in c.get("/api/messages").json()["messages"]}
+    assert vm["1501"]["service"] == "ambulance" and am["1501"]["service"] == "police"
+    v.post(f"/my/keyword/{uk['id']}/service", data={"csrf": vt, "service": "police"})
+    assert conn.execute("SELECT service FROM user_keywords WHERE id=?", (uk["id"],)).fetchone()[0] == "police"
+    assert v.post(f"/config/keyword/{kw['id']}/service", data={"csrf": vt, "service": "fire"}).status_code == 403
+    conn.close()

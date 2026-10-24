@@ -182,14 +182,12 @@ def msg_dict(row, view) -> dict:
     d["time"] = fmt_ts(d["ts"])
     res = kwrules.apply_view(d.get("message") or "", d["capcode"], view,
                              d.pop("cap_alert", 0), d.pop("cap_suppress", 0),
-                             d.pop("cap_colour", ""), d.get("alias") or "")
+                             d.pop("cap_colour", ""), d.get("alias") or "", d.pop("cap_service", ""))
     d["alias"] = res.label
     d["alert"] = int(res.alert)
     d["suppressed"] = int(res.suppressed)
     d["colour"] = res.colour
-    shared_service = d.pop("cap_service", "")
-    personal = view.personal_caps.get(d["capcode"]) if getattr(view, "personal_caps", None) else None
-    d["service"] = (personal or {}).get("service") or shared_service or ""
+    d["service"] = res.service
     d["keywords"] = res.keywords
     d["keyword_ids"] = res.shared_keyword_ids
     d["p_keyword_ids"] = res.personal_keyword_ids
@@ -207,6 +205,10 @@ def _set_service(conn, table: str, row, service: str) -> str:
     A blank label, or one that was just the old service name, follows the service.
     """
     new = service if service in SERVICES and service != row["service"] else ""
+    if "label" not in row.keys():   # keyword rules have no label
+        conn.execute(f"UPDATE {table} SET service = ? WHERE id = ?", (new, row["id"]))
+        db.bump_rules_version(conn)
+        return new
     label = row["label"] or ""
     if not label or label == SERVICES.get(row["service"], ""):
         label = SERVICES.get(new, "")
@@ -972,7 +974,8 @@ def create_app() -> FastAPI:
     @app.post("/my/keyword")
     async def my_save_keyword(request: Request, csrf: str = Form(""), id: int = Form(0),
                               keyword: str = Form(""), match: str = Form("word"),
-                              alert: str = Form(""), suppress: str = Form(""), colour: str = Form("")):
+                              alert: str = Form(""), suppress: str = Form(""), colour: str = Form(""),
+                              service: str = Form("")):
         check_csrf(request, csrf)
         conn, user = require_user(request)
         try:
@@ -986,8 +989,9 @@ def create_app() -> FastAPI:
             al = 1 if alert else 0
             sup = 0 if al else (1 if suppress else 0)
             has_routes = any(k.startswith("kiosk_") and v for k, v in (await request.form()).multi_items())
-            if not (al or sup or colour or has_routes):
-                flash(request, "Choose at least one of Alert, Suppress, a colour or a kiosk setting.", "error")
+            service = service if service in SERVICES else ""
+            if not (al or sup or colour or service or has_routes):
+                flash(request, "Choose at least one of Alert, Suppress, a service, a colour or a kiosk setting.", "error")
                 return back(f"/my?kw={id}#keyword-form" if id else "/my#keywords")
             if id and not conn.execute("SELECT 1 FROM user_keywords WHERE id = ? AND user_id = ?", (id, uid)).fetchone():
                 return back("/my#keywords")
@@ -997,12 +1001,13 @@ def create_app() -> FastAPI:
                 return back("/my#keywords")
             with db.transaction(conn):
                 if id:
-                    conn.execute("UPDATE user_keywords SET keyword=?, match=?, alert=?, suppress=?, colour=? "
-                                 "WHERE id=? AND user_id=?", (keyword, match, al, sup, colour, id, uid))
+                    conn.execute("UPDATE user_keywords SET keyword=?, match=?, alert=?, suppress=?, colour=?, service=? "
+                                 "WHERE id=? AND user_id=?", (keyword, match, al, sup, colour, service, id, uid))
                     rid = id
                 else:
-                    rid = conn.execute("INSERT INTO user_keywords (user_id, keyword, match, alert, suppress, colour) "
-                                       "VALUES (?, ?, ?, ?, ?, ?)", (uid, keyword, match, al, sup, colour)).lastrowid
+                    rid = conn.execute("INSERT INTO user_keywords (user_id, keyword, match, alert, suppress, colour, service) "
+                                       "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                       (uid, keyword, match, al, sup, colour, service)).lastrowid
                 await _save_my_routes(request, conn, uid, "keyword", rid)
                 db.bump_rules_version(conn)
             flash(request, f"Saved keyword \u201c{keyword}\u201d.")
@@ -1078,12 +1083,13 @@ def create_app() -> FastAPI:
         conn, user = require_user(request)
         try:
             uid = user["id"]
-            if kind == "capcode" and action == "service":
-                row = conn.execute("SELECT * FROM user_aliases WHERE id = ? AND user_id = ?", (rid, uid)).fetchone()
+            if kind in ("capcode", "keyword") and action == "service":
+                table = "user_aliases" if kind == "capcode" else "user_keywords"
+                row = conn.execute(f"SELECT * FROM {table} WHERE id = ? AND user_id = ?", (rid, uid)).fetchone()
                 if row:
                     with db.transaction(conn):
-                        _set_service(conn, "user_aliases", row, service)
-                return back("/my")
+                        _set_service(conn, table, row, service)
+                return back("/my" if kind == "capcode" else "/my#keywords")
             if kind in ("capcode", "keyword") and action in ("suppress", "delete"):
                 table = "user_aliases" if kind == "capcode" else "user_keywords"
                 row = conn.execute(f"SELECT * FROM {table} WHERE id = ? AND user_id = ?", (rid, uid)).fetchone()
@@ -1275,7 +1281,7 @@ def create_app() -> FastAPI:
     async def save_keyword(request: Request, csrf: str = Form(""), id: int = Form(0),
                            keyword: str = Form(""), match: str = Form("word"),
                            alert: str = Form(""), suppress: str = Form(""),
-                           colour: str = Form("")):
+                           colour: str = Form(""), service: str = Form("")):
         check_csrf(request, csrf)
         conn, user = require_user(request, admin=True)
         try:
@@ -1288,8 +1294,9 @@ def create_app() -> FastAPI:
             al = 1 if alert else 0
             sup = 0 if al else (1 if suppress else 0)  # an alerting keyword is never hidden
             has_routes = any(k.startswith("kiosk_") and v for k, v in (await request.form()).multi_items())
-            if not (al or sup or colour or has_routes):
-                flash(request, "Choose at least one of Alert, Suppress, a colour or a kiosk setting for the keyword.", "error")
+            service = service if service in SERVICES else ""
+            if not (al or sup or colour or service or has_routes):
+                flash(request, "Choose at least one of Alert, Suppress, a service, a colour or a kiosk setting for the keyword.", "error")
                 return back(f"/capcodes?kw={id}#keywords" if id else "/capcodes#keywords")
             clash = conn.execute("SELECT id FROM keywords WHERE keyword = ? AND id != ?",
                                  (keyword, id)).fetchone()
@@ -1298,17 +1305,18 @@ def create_app() -> FastAPI:
                 return back("/capcodes#keywords")
             with db.transaction(conn):
                 if id:
-                    conn.execute("UPDATE keywords SET keyword=?, match=?, alert=?, suppress=?, colour=? "
-                                 "WHERE id=?", (keyword, match, al, sup, colour, id))
+                    conn.execute("UPDATE keywords SET keyword=?, match=?, alert=?, suppress=?, colour=?, service=? "
+                                 "WHERE id=?", (keyword, match, al, sup, colour, service, id))
                     rule_id = id
                 else:
-                    rule_id = conn.execute("INSERT INTO keywords (keyword, match, alert, suppress, colour) "
-                                           "VALUES (?, ?, ?, ?, ?)", (keyword, match, al, sup, colour)).lastrowid
+                    rule_id = conn.execute("INSERT INTO keywords (keyword, match, alert, suppress, colour, service) "
+                                           "VALUES (?, ?, ?, ?, ?, ?)", (keyword, match, al, sup, colour, service)).lastrowid
                 routes = await _save_routes(request, conn, "keyword", rule_id)
                 db.bump_rules_version(conn)
                 db.audit(conn, user["username"], "keyword_save",
                          f"{keyword} ({match}){' alert' if al else ''}{' suppressed' if sup else ''}"
                          f"{' colour=' + colour if colour else ''}"
+                         f"{' service=' + service if service else ''}"
                          f"{' kiosks: ' + ', '.join(routes) if routes else ''}")
             flash(request, f"Saved keyword \u201c{keyword}\u201d.")
             return back("/capcodes#keywords")
@@ -1360,6 +1368,20 @@ def create_app() -> FastAPI:
                     new = _set_service(conn, "aliases", row, service)
                     db.audit(conn, user["username"], "alias_service", f"{row['capcode']} = {new or '(none)'}")
             return back("/capcodes")
+        finally:
+            conn.close()
+
+    @app.post("/config/keyword/{kid}/service")
+    async def set_keyword_service(request: Request, kid: int, csrf: str = Form(""), service: str = Form("")):
+        check_csrf(request, csrf)
+        conn, user = require_user(request, admin=True)
+        try:
+            row = conn.execute("SELECT * FROM keywords WHERE id = ?", (kid,)).fetchone()
+            if row:
+                with db.transaction(conn):
+                    new = _set_service(conn, "keywords", row, service)
+                    db.audit(conn, user["username"], "keyword_service", f"{row['keyword']} = {new or '(none)'}")
+            return back("/capcodes#keywords")
         finally:
             conn.close()
 
