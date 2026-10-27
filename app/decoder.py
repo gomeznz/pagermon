@@ -428,7 +428,7 @@ def send_webhook(url: str, payload: dict) -> None:
     try:
         req = urllib.request.Request(
             url, data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json", "User-Agent": "pager-monitor"},
+            headers={"Content-Type": "application/json", "User-Agent": "multipage"},
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             resp.read()

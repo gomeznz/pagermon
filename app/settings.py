@@ -2,7 +2,7 @@
 
 Everything a user would change day to day (frequencies, gain, retention,
 users) lives in the database and is edited in the web UI. These are only the
-deployment-level knobs, set in /etc/pager-monitor/pager-monitor.env.
+deployment-level knobs, set in /etc/multipage/multipage.env.
 """
 
 import os
@@ -16,7 +16,7 @@ def _bool(name: str, default: bool) -> bool:
     return val.strip().lower() in ("1", "true", "yes", "on")
 
 
-DB_PATH = Path(os.environ.get("PAGER_DB", "/var/lib/pager-monitor/pager.db"))
+DB_PATH = Path(os.environ.get("PAGER_DB", "/var/lib/multipage/pager.db"))
 
 # Web server
 BIND = os.environ.get("PAGER_BIND", "0.0.0.0")

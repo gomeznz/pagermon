@@ -7,10 +7,15 @@
 # Safe to re-run: it upgrades the code and keeps your database and settings.
 set -euo pipefail
 
-APP_DIR=/opt/pager-monitor
-DATA_DIR=/var/lib/pager-monitor
-CONF_DIR=/etc/pager-monitor
-ENV_FILE=$CONF_DIR/pager-monitor.env
+APP_DIR=/opt/multipage
+DATA_DIR=/var/lib/multipage
+CONF_DIR=/etc/multipage
+ENV_FILE=$CONF_DIR/multipage.env
+# Locations used before version 1.3 (moved automatically on upgrade)
+OLD_APP_DIR=/opt/pager-monitor
+OLD_DATA_DIR=/var/lib/pager-monitor
+OLD_CONF_DIR=/etc/pager-monitor
+OLD_ENV_FILE=$OLD_CONF_DIR/pager-monitor.env
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_BLOG_DRIVER=0
 
@@ -61,6 +66,31 @@ for mod in rtl2832_sdr dvb_usb_rtl28xxu rtl2832 rtl2830; do
   modprobe -r "$mod" 2>/dev/null || true
 done
 udevadm control --reload-rules && udevadm trigger || true
+
+if [[ -d $OLD_DATA_DIR || -d $OLD_CONF_DIR || -d $OLD_APP_DIR ]]; then
+  say "Moving an earlier install to the new multipage locations"
+  systemctl stop pager-decoder.service pager-web.service 2>/dev/null || true
+  if [[ -d $OLD_DATA_DIR && ! -e $DATA_DIR ]]; then
+    mv "$OLD_DATA_DIR" "$DATA_DIR"
+    echo "Data:     $OLD_DATA_DIR -> $DATA_DIR"
+  elif [[ -d $OLD_DATA_DIR ]]; then
+    echo "WARNING: both $OLD_DATA_DIR and $DATA_DIR exist; leaving $OLD_DATA_DIR untouched." >&2
+  fi
+  if [[ -f $OLD_ENV_FILE && ! -e $ENV_FILE ]]; then
+    mkdir -p "$CONF_DIR"
+    mv "$OLD_ENV_FILE" "$ENV_FILE"
+    sed -i "s#$OLD_DATA_DIR#$DATA_DIR#g; s#$OLD_APP_DIR#$APP_DIR#g; s#$OLD_ENV_FILE#$ENV_FILE#g" "$ENV_FILE"
+    echo "Settings: $OLD_ENV_FILE -> $ENV_FILE"
+  fi
+  rmdir "$OLD_CONF_DIR" 2>/dev/null || true
+  if [[ -d $OLD_APP_DIR ]]; then
+    rm -rf "$OLD_APP_DIR"   # program files only; reinstalled below
+    echo "Program:  $OLD_APP_DIR removed (reinstalled to $APP_DIR)"
+  fi
+  if id pager >/dev/null 2>&1; then
+    usermod --home "$DATA_DIR" pager
+  fi
+fi
 
 say "Creating service user"
 if ! id pager >/dev/null 2>&1; then

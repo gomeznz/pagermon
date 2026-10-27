@@ -35,8 +35,8 @@ RTL-SDR ─▶ rtl_fm ─▶ multimon-ng ─▶ decoder service ─▶ SQLite �
 Requires Raspberry Pi OS Bookworm or later, 64-bit (Lite is fine).
 
 ```bash
-git clone <your repo> pager-monitor   # or copy the folder across
-cd pager-monitor
+git clone <your repo> multipage   # or copy the folder across
+cd multipage
 sudo ./install.sh                     # add --rtlsdr-blog for an RTL-SDR Blog V4
 ```
 
@@ -44,12 +44,14 @@ The installer does the following:
 
 - installs `rtl-sdr`, `multimon-ng` and Python
 - blacklists the DVB-T TV driver
-- creates the `pager` user and puts the app in `/opt/pager-monitor`
-- keeps data in `/var/lib/pager-monitor`
+- creates the `pager` user and puts the app in `/opt/multipage`
+- keeps data in `/var/lib/multipage`
 - asks you to create the first admin account
 - starts both services
 
 Re-running it upgrades the code and keeps your data.
+
+> **Upgrading from 1.2 or earlier:** the install folders were renamed from `pager-monitor` to `multipage` in 1.3. Re-running the installer moves your data (`/var/lib/pager-monitor` → `/var/lib/multipage`) and settings (`/etc/pager-monitor/pager-monitor.env` → `/etc/multipage/multipage.env`) across automatically and updates the paths inside the settings file. Your users, rules, kiosks and pages are kept. If you back up or script against the old paths, update those too.
 
 > **RTL-SDR Blog V4:** the Debian `rtl-sdr` package doesn't support the V4's tuner properly. Use `--rtlsdr-blog` to build the RTL-SDR Blog driver instead (it also works with V3 and generic dongles).
 
@@ -74,7 +76,7 @@ journalctl -u pager-web -f
 curl http://localhost:8080/healthz       # 200 when the decoder is running, 503 if not
 ```
 
-Deployment settings (port, HTTPS cookies, session length) are in `/etc/pager-monitor/pager-monitor.env`. Restart both services after editing it.
+Deployment settings (port, HTTPS cookies, session length) are in `/etc/multipage/multipage.env`. Restart both services after editing it.
 
 ## Remote access
 
@@ -134,7 +136,7 @@ This works with ntfy, Home Assistant, Node-RED, n8n, or your own endpoint.
 
 ## Testing without a dongle
 
-Set `PAGER_SIMULATE_FILE=/opt/pager-monitor/app/sample_pages.txt` in the env file and restart. The decoder then replays those multimon-ng lines on every enabled channel instead of opening hardware.
+Set `PAGER_SIMULATE_FILE=/opt/multipage/app/sample_pages.txt` in the env file and restart. The decoder then replays those multimon-ng lines on every enabled channel instead of opening hardware.
 
 For development on any machine:
 
