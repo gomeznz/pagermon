@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import __version__, auth, db, locations, rules as kwrules, settings
+from . import __version__, auth, db, locations, pushover, rules as kwrules, settings
 from .decoder import VALID_PROTOCOLS
 
 BASE = Path(__file__).parent
@@ -69,6 +69,7 @@ def fmt_mhz(hz) -> str:
 
 templates.env.filters["ts"] = fmt_ts
 templates.env.filters["mhz"] = fmt_mhz
+templates.env.filters["pushmask"] = pushover.mask
 
 
 def pw_tag(pw_hash: str) -> str:
@@ -469,7 +470,9 @@ def create_app() -> FastAPI:
             editing = None
             if edit:
                 editing = conn.execute("SELECT * FROM channels WHERE id = ?", (edit,)).fetchone()
-            s = {k: db.get_setting(conn, k) for k in ("retention_days", "dedupe_seconds", "webhook_url")}
+            s = {k: db.get_setting(conn, k) for k in ("retention_days", "dedupe_seconds", "webhook_url",
+                                                      "pushover_token", "pushover_user", "pushover_priority",
+                                                      "public_url")}
             kiosks = conn.execute("SELECT * FROM kiosks WHERE owner_id IS NULL "
                                   "ORDER BY name COLLATE NOCASE").fetchall()
             personal_kiosks = conn.execute(
@@ -477,7 +480,7 @@ def create_app() -> FastAPI:
                 "ORDER BY u.username COLLATE NOCASE, k.name COLLATE NOCASE").fetchall()
             base_url = str(request.base_url).rstrip("/")
             return render(request, "config.html", user, channels=channels, editing=editing,
-                          s=s, protocols=VALID_PROTOCOLS, kiosks=kiosks, base_url=base_url,
+                          s=s, push_priorities=pushover.PRIORITIES, protocols=VALID_PROTOCOLS, kiosks=kiosks, base_url=base_url,
                           personal_kiosks=personal_kiosks, loc=loc, loc_stats=loc_stats,
                           loc_test=loc_test, page_name="config")
         finally:
@@ -679,6 +682,45 @@ def create_app() -> FastAPI:
                          f"retention={rd}d dedupe={ds}s webhook={'set' if webhook_url else 'none'}")
             flash(request, "Settings saved.")
             return back("/config#settings")
+        finally:
+            conn.close()
+
+    @app.post("/config/pushover")
+    async def save_pushover(request: Request, csrf: str = Form(""), pushover_token: str = Form(""),
+                            pushover_user: str = Form(""), pushover_priority: str = Form("1"),
+                            public_url: str = Form(""), clear: str = Form(""), test: str = Form("")):
+        check_csrf(request, csrf)
+        conn, user = require_user(request, admin=True)
+        try:
+            token = pushover_token.strip() or db.get_setting(conn, "pushover_token")
+            ukey = pushover_user.strip() or db.get_setting(conn, "pushover_user")
+            if clear:
+                token = ukey = ""
+            for name, val in (("application token", token), ("user or group key", ukey)):
+                if val and not pushover.valid_key(val):
+                    flash(request, f"The Pushover {name} should be 30 letters and numbers.", "error")
+                    return back("/config#pushover")
+            public_url = public_url.strip().rstrip("/")
+            if public_url and not re.match(r"^https?://[^\s/]+(/[^\s]*)?$", public_url):
+                flash(request, "The link address must start with http:// or https://", "error")
+                return back("/config#pushover")
+            prio = pushover_priority if pushover_priority in pushover.PRIORITIES else "1"
+            with db.transaction(conn):
+                for k, v in (("pushover_token", token), ("pushover_user", ukey),
+                             ("pushover_priority", prio), ("public_url", public_url)):
+                    db.set_setting(conn, k, v)
+                db.bump_rules_version(conn)
+                db.audit(conn, user["username"], "pushover_settings",
+                         f"{'on' if token and ukey else 'off'}, priority {prio}"
+                         f"{', link ' + public_url if public_url else ''}")
+            if test:
+                if not (token and ukey):
+                    flash(request, "Add both the application token and a user key to send a test.", "error")
+                else:
+                    flash(request, *_pushover_test(token, ukey, prio, public_url, user["username"]))
+            else:
+                flash(request, "Pushover alerts are on." if token and ukey else "Pushover settings saved; alerts are off until both keys are set.")
+            return back("/config#pushover")
         finally:
             conn.close()
 
@@ -925,6 +967,7 @@ def create_app() -> FastAPI:
         conn, user = require_user(request)
         try:
             return render(request, "my_kiosks.html", user, kiosks=_my_kiosks(conn, user["id"]),
+                          push_shared=bool(db.get_setting(conn, "pushover_token")),
                           kiosk_limit=_kiosk_limit(user),
                           base_url=str(request.base_url).rstrip("/"), page_name="mykiosks")
         finally:
@@ -1120,6 +1163,39 @@ def create_app() -> FastAPI:
                         db.audit(conn, user["username"], f"my_kiosk_{action}", row["name"])
                 return back("/my/kiosks")
             return back("/my")
+        finally:
+            conn.close()
+
+    @app.post("/my/pushover")
+    async def my_pushover(request: Request, csrf: str = Form(""), pushover_user: str = Form(""),
+                          pushover_token: str = Form(""), clear: str = Form(""), test: str = Form("")):
+        check_csrf(request, csrf)
+        conn, user = require_user(request)
+        try:
+            ukey = pushover_user.strip() or user["pushover_user"]
+            token = pushover_token.strip() or user["pushover_token"]
+            if clear:
+                ukey = token = ""
+            for name, val in (("user key", ukey), ("application token", token)):
+                if val and not pushover.valid_key(val):
+                    flash(request, f"Your Pushover {name} should be 30 letters and numbers.", "error")
+                    return back("/my/kiosks#my-pushover")
+            shared_token = db.get_setting(conn, "pushover_token")
+            with db.transaction(conn):
+                conn.execute("UPDATE users SET pushover_user = ?, pushover_token = ? WHERE id = ?",
+                             (ukey, token, user["id"]))
+                db.bump_rules_version(conn)
+                db.audit(conn, user["username"], "my_pushover", "on" if ukey else "off")
+            use_token = token or shared_token
+            if ukey and not use_token:
+                flash(request, "Saved, but alerts can't be sent yet: add your own application token, "
+                               "or ask an admin to set one up on the Config page.", "error")
+            elif test and ukey:
+                flash(request, *_pushover_test(use_token, ukey, db.get_setting(conn, "pushover_priority") or "1",
+                                              db.get_setting(conn, "public_url"), user["username"]))
+            else:
+                flash(request, "Pushover alerts are on." if ukey else "Pushover alerts turned off.")
+            return back("/my/kiosks#my-pushover")
         finally:
             conn.close()
 
@@ -1690,6 +1766,17 @@ def _tile_origin() -> str:
         except Exception:
             _tile_cache["origin"] = ""
     return _tile_cache["origin"]
+
+
+def _pushover_test(token: str, user_key: str, priority: str, public_url: str, who: str) -> tuple[str, str]:
+    """Send a test notification; returns (flash message, kind)."""
+    fields = pushover.build({"ts": time.time(), "capcode": "TEST", "channel": "MultipagePlus",
+                             "message": f"Test alert for {who}. If you can read this, Pushover alerts work."},
+                            label="Test", service="fire", priority=priority,
+                            link=(public_url.rstrip("/") + "/") if public_url else "")
+    ok, _, detail = pushover.send(token, user_key, fields)
+    return ("Saved. Test notification sent; check your phone.", "ok") if ok else \
+           (f"Saved, but Pushover refused the test: {detail}", "error")
 
 
 def _post_json(url: str, payload: dict) -> str | None:

@@ -201,6 +201,10 @@ DEFAULT_SETTINGS = {
     "map_tiles": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     "map_attribution": "© OpenStreetMap contributors",
     "decoder_heartbeat": "0",
+    "pushover_token": "",
+    "pushover_user": "",
+    "pushover_priority": "1",
+    "public_url": "",
 }
 
 
@@ -264,6 +268,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN max_kiosks INTEGER NOT NULL DEFAULT 3")
     if ucols and "notify_url" not in ucols:
         conn.execute("ALTER TABLE users ADD COLUMN notify_url TEXT NOT NULL DEFAULT ''")
+    for col in ("pushover_user", "pushover_token"):  # personal Pushover alerts
+        if ucols and col not in ucols:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
     if "colour" not in cols:
         conn.execute("ALTER TABLE aliases ADD COLUMN colour TEXT NOT NULL DEFAULT ''")
     if "service" not in cols:  # '', fire, police or ambulance

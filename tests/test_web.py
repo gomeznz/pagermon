@@ -698,3 +698,81 @@ def test_keyword_service(app):
     assert conn.execute("SELECT service FROM user_keywords WHERE id=?", (uk["id"],)).fetchone()[0] == "police"
     assert v.post(f"/config/keyword/{kw['id']}/service", data={"csrf": vt, "service": "fire"}).status_code == 403
     conn.close()
+
+
+def test_pushover_settings_and_alerts(app, monkeypatch):
+    import json as _json
+    from tests.test_pushover import FakePushover, TOKEN, USER
+    from app import pushover
+    from app.decoder import Decoder
+    from app.parser import parse_line
+    fake = FakePushover()
+    monkeypatch.setattr(pushover, "API_URL", fake.url)
+    conn = db.connect()
+    _reset_personal(conn)
+    try:
+        c = TestClient(app)
+        login(c, "alex")
+        token = csrf_of(c.get("/config").text)
+        # bad key refused, nothing saved
+        c.post("/config/pushover", data={"csrf": token, "pushover_token": "nope", "pushover_user": USER})
+        assert db.get_setting(conn, "pushover_token") == ""
+        # good keys saved; the page never shows them in full
+        c.post("/config/pushover", data={"csrf": token, "pushover_token": TOKEN, "pushover_user": USER,
+                                         "pushover_priority": "0", "public_url": "https://pager.example.com/"})
+        assert db.get_setting(conn, "pushover_token") == TOKEN
+        assert db.get_setting(conn, "public_url") == "https://pager.example.com"
+        page = c.get("/config").text
+        assert TOKEN not in page and USER not in page and TOKEN[-4:] in page
+        # blank fields keep the saved keys; a test goes to Pushover
+        c.post("/config/pushover", data={"csrf": token, "pushover_priority": "1", "public_url": "https://pager.example.com", "test": "1"})
+        assert db.get_setting(conn, "pushover_user") == USER and len(fake.requests) == 1
+        assert fake.requests[0]["token"] == TOKEN and "Test alert" in fake.requests[0]["message"]
+        # an alert page goes out through the decoder
+        conn.execute("INSERT INTO aliases (capcode, label, alert, service) VALUES ('1500', 'Station 41', 1, 'fire')")
+        d = Decoder.__new__(Decoder)
+        d.conn, d.loc_cfg, d.loc_worker, d.dedupe_seconds, d.recent = conn, {}, None, 0, {}
+        d.load_rules()
+        d.push_sender = pushover.Sender(retry_wait=0.05)
+        d.push_sender.start()
+        ch = {"id": 1, "name": "Bench", "freq_hz": 157450000}
+        d.store(ch, parse_line("POCSAG1200: Address: 1500  Function: 3  Alpha:   SMOKE ALARM"), time.time())
+        d.store(ch, parse_line("POCSAG1200: Address: 5555  Function: 3  Alpha:   not an alert"), time.time())
+        for _ in range(100):
+            if len(fake.requests) >= 2:
+                break
+            time.sleep(0.02)
+        sent = fake.requests[1]
+        assert sent["title"].endswith("Station 41 · Bench") and sent["message"] == "SMOKE ALARM"
+        assert sent["priority"] == 1 and sent["url"] == "https://pager.example.com/history?capcode=1500"
+        time.sleep(0.2)
+        assert len(fake.requests) == 2          # the non-alert page sent nothing
+        # personal: a viewer with only a user key uses the shared app token, for pages they may see
+        v = TestClient(app)
+        login(v, "viewer1", "a brand new password")
+        vt = csrf_of(v.get("/my/kiosks").text)
+        assert "only need your" in v.get("/my/kiosks").text
+        vuser = "v" * 29 + "3"
+        v.post("/my/pushover", data={"csrf": vt, "pushover_user": vuser})
+        vid = conn.execute("SELECT id FROM users WHERE username='viewer1'").fetchone()[0]
+        assert conn.execute("SELECT pushover_user FROM users WHERE id=?", (vid,)).fetchone()[0] == vuser
+        conn.execute("INSERT INTO user_keywords (user_id, keyword, alert) VALUES (?, 'boiler', 1)", (vid,))
+        d.load_rules()
+        fake.requests.clear()
+        d.store(ch, parse_line("POCSAG1200: Address: 1501  Function: 3  Alpha:   BOILER fault"), time.time())
+        d.store(ch, parse_line("POCSAG1200: Address: 9999  Function: 3  Alpha:   boiler outside filter"), time.time())
+        time.sleep(0.4)
+        assert [(r["user"], r["token"]) for r in fake.requests] == [(vuser, TOKEN)]
+        # turning off clears it; removing shared keys stops shared alerts
+        v.post("/my/pushover", data={"csrf": vt, "clear": "1"})
+        assert conn.execute("SELECT pushover_user FROM users WHERE id=?", (vid,)).fetchone()[0] == ""
+        c.post("/config/pushover", data={"csrf": token, "clear": "1"})
+        assert db.get_setting(conn, "pushover_token") == "" and db.get_setting(conn, "pushover_user") == ""
+        d.push_sender.stop()
+    finally:
+        fake.close()
+        conn.execute("DELETE FROM aliases WHERE capcode = '1500'")
+        conn.execute("UPDATE users SET pushover_user = '', pushover_token = ''")
+        for k in ("pushover_token", "pushover_user", "public_url"):
+            db.set_setting(conn, k, "")
+        conn.close()

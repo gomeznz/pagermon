@@ -25,6 +25,7 @@ RTL-SDR ─▶ rtl_fm ─▶ multimon-ng ─▶ decoder service ─▶ SQLite �
 - **Keyword rules** (admins, on the Capcodes page): words or phrases in the message text that trigger an alert, are suppressed, or get a colour, on any capcode. Matches are highlighted in the message. Whole-word or anywhere matching, case-insensitive. Alerts always win over suppression, and a keyword's colour beats the capcode's. Webhook alerts include the matched keywords.
 - **Kiosk displays** (admins create them on Config): a full-screen, read-only live view for a wall screen, opened from its own secret link with no sign-in. Large text, a clock, and alert pages that pulse red. Each kiosk can have its own capcode filter and theme. Links can be disabled, replaced or removed at any time, which cuts off open screens within seconds.
 - **My capcodes** and **My kiosks** (every user): **My capcodes** has the same layout as the admin Capcodes page, for personal capcode labels, colours, alerts and suppression and personal keywords. **My kiosks** holds personal kiosks and a personal alert webhook (e.g. an ntfy topic). They sit on top of the shared rules and only change that user's own view. A user's admin-set capcode filter is always the outer limit, including on their kiosks. Admins set how many personal kiosks each user may have (Users page) and can disable or remove any of them (Config). Live has a **Notify me** option for browser pop-ups on alert pages (needs HTTPS, e.g. via Cloudflare Tunnel).
+- **Pushover** (Config, and per user on My kiosks): alert pages straight to the Pushover phone app, titled with the capcode label and service icon.
 - **Locations and map** (turn on under Config → Locations): addresses in page text are looked up and shown on a **Map** page, on Live/History as a 📍 chip, and optionally on kiosks. A house, RAPID or property number gives a pin; a street, suburb or town on its own gives a shaded area circle.
 - **Debug console** (admins): opened from Config in its own tab. Shows every raw line multimon-ng sends, rtl_fm and multimon-ng error output, and pipeline start/stop events, live. Lines that couldn't be parsed are highlighted, and the log can be filtered, paused, cleared or downloaded. The last 5,000 lines are kept.
 - **Access control**: argon2-hashed passwords, admin and viewer roles, and optional per-user capcode filters (e.g. `1234567, 2000000-2000099`). Includes login lockout after 5 failures, CSRF protection, and sign-out of other sessions on password change. An **audit log** records sign-ins, config changes, user changes and exports.
@@ -121,6 +122,20 @@ Turn on **Config → Locations & map**, set a **default town or region** (used w
 - **Town / place** (larger circle): just a suburb, town or place (`LOC: BLUFF WHARF`).
 
 Addresses are found by street type (St, Rd, Ave, Cres, Tce, Hwy, SH1…), or after a marker word such as `LOC:` or `@` if your pages use one (configurable). Lookups use OpenStreetMap's Nominatim service by default, which in New Zealand includes LINZ addresses with rural RAPID numbers. They're cached and limited to one a second, as Nominatim's usage policy requires, and happen in the background so decoding never waits. **Turning lookups on sends the address part of matching pages to that service**; point the geocoder setting at your own Nominatim server if you'd rather nothing leaves your network. Map tiles come from OpenStreetMap by default (also configurable). The map library (Leaflet) is bundled with the app.
+
+## Pushover
+
+Alert pages can go straight to the [Pushover](https://pushover.net) app, no relay needed.
+
+1. At pushover.net, create an application (any name, e.g. MultipagePlus) and copy its **application token**. Copy your **user key** from the dashboard, or use a delivery group's key to reach several people.
+2. In **Config → Pushover**, paste both and press **Save & send test**.
+3. Optionally set a **Link address** (e.g. your Cloudflare Tunnel address) to add an "Open in MultipagePlus" link to each notification.
+
+Each notification's title is the capcode label with its service icon (🔥 / 👮 / 🚑) and channel; the message is the page text plus any matched keywords. **Priority** defaults to High, which sounds through quiet hours; Normal and Quiet are also available.
+
+Every user can also get their own **Alert me** pages under **My kiosks → Pushover**. With a shared application set up they only need their user key; otherwise they can enter their own application token.
+
+Saved keys are never shown in full on the page. Notifications are sent one at a time in the background; a server or network error is retried once after a few seconds, and a refusal such as a bad key or a used-up monthly quota is logged in the decoder log (`journalctl -u pager-decoder`). Pushover's free tier allows 10,000 messages a month per application.
 
 ## Alert webhook
 

@@ -51,5 +51,22 @@
     <button name="test" value="1">Save &amp; send test</button>
   </form>
 </section>
+
+<section class="card" id="my-pushover">
+  <h2>Pushover {% if user.pushover_user and (user.pushover_token or push_shared) %}<span class="tag ok">on</span>{% else %}<span class="tag">off</span>{% endif %}</h2>
+  <p class="muted">Get your <strong>Alert me</strong> pages as notifications in the <a href="https://pushover.net" target="_blank" rel="noopener">Pushover</a> app. {% if push_shared %}An application is already set up, so you only need your <strong>user key</strong> from your pushover.net dashboard.{% else %}Enter your <strong>user key</strong> and an <strong>application token</strong> (create an application at pushover.net), or ask an admin to set up a shared application.{% endif %}</p>
+  <form method="post" action="/my/pushover" class="grid">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Your user key <input name="pushover_user" class="mono" autocomplete="off" spellcheck="false" maxlength="30" placeholder="{{ user.pushover_user|pushmask or 'Paste your user key' }}">
+      <small>{% if user.pushover_user %}Saved. Leave blank to keep it.{% else %}30 letters and numbers.{% endif %}</small></label>
+    <label>Application token {{ '(optional)' if push_shared else '' }} <input name="pushover_token" class="mono" autocomplete="off" spellcheck="false" maxlength="30" placeholder="{{ user.pushover_token|pushmask or ('uses the shared application' if push_shared else 'Paste your application token') }}">
+      <small>{% if user.pushover_token %}Saved. Leave blank to keep it.{% elif push_shared %}Only if you want to use your own application.{% else %}Needed until an admin sets up a shared one.{% endif %}</small></label>
+    <div class="span2 form-actions">
+      <button class="primary">Save</button>
+      <button name="test" value="1">Save &amp; send test</button>
+      {% if user.pushover_user or user.pushover_token %}<button name="clear" value="1" class="danger">Turn off</button>{% endif %}
+    </div>
+  </form>
+</section>
 {% endblock %}
 {% block scripts %}<script src="/static/confirm.js?v={{ version }}"></script><script src="/static/config.js?v={{ version }}"></script>{% endblock %}

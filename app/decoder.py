@@ -28,7 +28,7 @@ import urllib.request
 from collections import deque
 
 from . import db, settings
-from . import auth, locations, rules as kwrules
+from . import auth, locations, pushover, rules as kwrules
 from .parser import Page, parse_line
 
 log = logging.getLogger("pager.decoder")
@@ -227,6 +227,8 @@ class Decoder:
         self.loc_worker = None
         self.dedupe_seconds = 0
         self.webhook_url = ""
+        self.push: dict = {}
+        self.push_sender = None
         self.recent: dict[tuple[str, str], float] = {}
         self.running = True
         self.last_purge = 0.0
@@ -252,9 +254,11 @@ class Decoder:
             self.loc_worker = locations.LocationWorker(db.connect, self.loc_cfg)
             self.loc_worker.start()
         # Users with their own alert webhook: (user row, their personal view, parsed filter)
+        self.push = {k: db.get_setting(self.conn, k).strip() for k in
+                     ("pushover_token", "pushover_user", "pushover_priority", "public_url")}
         self.personal = []
         for u in self.conn.execute(
-                "SELECT * FROM users WHERE active = 1 AND notify_url != ''").fetchall():
+                "SELECT * FROM users WHERE active = 1 AND (notify_url != '' OR pushover_user != '')").fetchall():
             self.personal.append((dict(u), kwrules.load_view(self.conn, u["id"]),
                                   auth.parse_capcode_filter(u["capcode_filter"])))
 
@@ -329,6 +333,11 @@ class Decoder:
             threading.Thread(
                 target=send_webhook, args=(self.webhook_url, payload), daemon=True
             ).start()
+        page_info = {"ts": ts, "channel": ch["name"], "capcode": page.capcode,
+                     "type": page.msg_type, "message": page.message}
+        if res.alert and self.push.get("pushover_token") and self.push.get("pushover_user"):
+            self.pushover(self.push["pushover_token"], self.push["pushover_user"], page_info,
+                          alias.get("label", ""), res.service, res.keywords, "shared")
         # Personal alerts go to each user's own webhook, only for pages they may see.
         for u, view, ranges in self.personal:
             if not auth.capcode_matches(ranges, page.capcode):
@@ -342,7 +351,23 @@ class Decoder:
                     "protocol": page.protocol, "capcode": page.capcode, "alias": shown.label,
                     "keywords": shown.keywords, "service": shown.service, "type": page.msg_type, "message": page.message,
                 }
-                threading.Thread(target=send_webhook, args=(u["notify_url"], payload), daemon=True).start()
+                if u.get("notify_url"):
+                    threading.Thread(target=send_webhook, args=(u["notify_url"], payload), daemon=True).start()
+                token = u.get("pushover_token") or self.push.get("pushover_token")
+                if u.get("pushover_user") and token:
+                    self.pushover(token, u["pushover_user"], page_info, shown.label, shown.service,
+                                  shown.keywords, u["username"])
+
+    def pushover(self, token: str, user: str, page_info: dict, label: str, service: str,
+                 keywords, who: str) -> None:
+        if getattr(self, "push_sender", None) is None:
+            self.push_sender = pushover.Sender()
+            self.push_sender.start()
+        base = self.push.get("public_url", "").rstrip("/")
+        link = f"{base}/history?capcode={page_info['capcode']}" if base else ""
+        fields = pushover.build(page_info, label=label, service=service, keywords=keywords,
+                                priority=self.push.get("pushover_priority", "1"), link=link)
+        self.push_sender.enqueue(token, user, fields, who)
 
     def apply_status(self, channel_id: int, state: str, detail: str) -> None:
         self.conn.execute(
