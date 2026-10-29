@@ -226,7 +226,7 @@ class Geocoder:
         self.conn_factory = conn_factory
         self.cfg = cfg
         self.fetch = fetch or self._http
-        self.rejected = ""     # last result thrown away for being outside New Zealand
+        self.rejected = ""     # last result thrown away for being outside the allowed countries
 
     def _http(self, url: str) -> list:
         req = urllib.request.Request(url, headers={
@@ -237,7 +237,8 @@ class Geocoder:
 
     def lookup(self, params: dict) -> dict | None:
         params = {k: v for k, v in params.items() if v}
-        key = json.dumps(params, sort_keys=True)
+        countries = parse_countries(self.cfg.get("loc_countries"))
+        key = json.dumps(dict(params, _countries=",".join(countries)), sort_keys=True)
         conn = self.conn_factory()
         try:
             row = conn.execute("SELECT result, ts FROM geocode_cache WHERE key = ?", (key,)).fetchone()
@@ -245,11 +246,11 @@ class Geocoder:
                 age = time.time() - row["ts"]
                 if row["result"] and age < 90 * 86400:
                     cached = json.loads(row["result"])
-                    return cached if _nz_result(cached) else None
+                    return cached if result_ok(cached, countries) else None
                 if not row["result"] and age < 86400:
                     return None
             query = dict(params, format="jsonv2", limit="1", addressdetails="1")
-            query["countrycodes"] = COUNTRY          # New Zealand only, whatever the settings say
+            query["countrycodes"] = ",".join(countries)   # never blank: blank setting = New Zealand
             if self.cfg.get("loc_email"):
                 query["email"] = self.cfg["loc_email"]
             url = self.cfg.get("loc_geocoder") or DEFAULTS["loc_geocoder"]
@@ -263,9 +264,9 @@ class Geocoder:
                 finally:
                     Geocoder._last = time.time()
             result = data[0] if isinstance(data, list) and data else None
-            if result and not _nz_result(result):
-                log.info("ignoring a geocoder result outside New Zealand for %s: %s",
-                         params, result.get("display_name", ""))
+            if result and not result_ok(result, countries):
+                log.info("ignoring a geocoder result outside %s for %s: %s",
+                         countries_text(countries), params, result.get("display_name", ""))
                 self.rejected = result.get("display_name", "") or f"{result.get('lat')}, {result.get('lon')}"
                 result = None
             conn.execute("INSERT OR REPLACE INTO geocode_cache (key, result, ts) VALUES (?, ?, ?)",
@@ -275,47 +276,87 @@ class Geocoder:
             conn.close()
 
 
-# --- New Zealand only ---------------------------------------------------------
+# --- Which countries lookups may land in ------------------------------------------
 #
-# Lookups always ask for New Zealand results (countrycodes=nz), and every result,
-# including coordinates written in a page and anything from the cache or a
-# self-hosted geocoder, must land inside one of these boxes (lat_min, lat_max,
-# lon_min, lon_max). They cover the mainland, Stewart Island and the subantarctic
-# islands, the Chatham Islands and the Kermadec Islands, and exclude Norfolk and
-# Lord Howe islands and Australia.
-NZ_BOXES = (
-    (-53.0, -33.8, 165.8, 179.6),      # North, South, Stewart and subantarctic islands
-    (-45.0, -43.3, -177.2, -175.5),    # Chatham Islands
-    (-31.6, -29.0, -179.1, -177.6),    # Kermadec Islands
-)
-COUNTRY = "nz"
+# The Countries setting (two-letter codes, New Zealand by default) is sent to the
+# geocoder as countrycodes, and every result is checked again before it is used:
+#   * a geocoder answer that names its country must name one on the list
+#   * coordinates written in a page, and answers that don't name a country, must
+#     fall inside the outline of a listed country (boxes below; lat_min, lat_max,
+#     lon_min, lon_max). A listed country with no outline here can't be checked
+#     that way, so such points are allowed.
+# The setting can't be left blank: blank means New Zealand, never "anywhere".
+COUNTRY_BOXES = {
+    "nz": ((-53.0, -33.8, 165.8, 179.6),      # North, South, Stewart and subantarctic islands
+           (-45.0, -43.3, -177.2, -175.5),    # Chatham Islands
+           (-31.6, -29.0, -179.1, -177.6)),   # Kermadec Islands
+    "au": ((-44.0, -9.0, 112.0, 154.2),       # mainland, Tasmania, Torres Strait
+           (-31.9, -31.4, 158.9, 159.4)),     # Lord Howe Island
+    "gb": ((49.8, 61.0, -8.7, 2.0),),
+    "ie": ((51.3, 55.5, -10.7, -5.9),),
+    "us": ((24.3, 49.5, -125.0, -66.8),       # contiguous states
+           (51.0, 71.6, -180.0, -129.9),      # Alaska
+           (51.0, 53.0, 172.0, 180.0),        # Aleutians west of 180
+           (18.8, 22.4, -160.3, -154.7)),     # Hawaii
+    "ca": ((41.6, 83.2, -141.1, -52.5),),
+}
+COUNTRY_NAMES = {"nz": "New Zealand", "au": "Australia", "gb": "the United Kingdom", "ie": "Ireland",
+                 "us": "the United States", "ca": "Canada", "fj": "Fiji", "ws": "Samoa", "to": "Tonga",
+                 "ck": "the Cook Islands", "nc": "New Caledonia", "pg": "Papua New Guinea", "za": "South Africa"}
+DEFAULT_COUNTRIES = ["nz"]
 
 
-def in_nz(lat, lon) -> bool:
+def parse_countries(value: str | None) -> list[str]:
+    """Two-letter codes from the setting, in order, without repeats. Blank means New Zealand."""
+    codes = [c for c in re.split(r"[\s,;]+", (value or "").lower()) if re.fullmatch(r"[a-z]{2}", c)]
+    return list(dict.fromkeys(codes)) or list(DEFAULT_COUNTRIES)
+
+
+def country_name(cc: str) -> str:
+    return COUNTRY_NAMES.get(cc, cc.upper())
+
+
+def countries_text(countries) -> str:
+    names = [country_name(c) for c in countries]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def in_countries(lat, lon, countries) -> bool | None:
+    """True inside a listed country's outline; False outside all of them; None when that can't be told
+    (the point is outside the known outlines but a listed country has no outline)."""
     try:
         lat, lon = float(lat), float(lon)
     except (TypeError, ValueError):
         return False
-    return any(a <= lat <= b and c <= lon <= d for a, b, c, d in NZ_BOXES)
+    for cc in countries:
+        if any(a <= lat <= b and c <= lon <= d for a, b, c, d in COUNTRY_BOXES.get(cc, ())):
+            return True
+    return None if any(cc not in COUNTRY_BOXES for cc in countries) else False
 
 
-def _nz_result(r: dict | None) -> bool:
+def in_nz(lat, lon) -> bool:
+    return in_countries(lat, lon, ["nz"]) is True
+
+
+def result_ok(r: dict | None, countries) -> bool:
     if not r:
         return False
     cc = ((r.get("address") or {}).get("country_code") or "").lower()
-    return in_nz(r.get("lat"), r.get("lon")) and cc in ("", COUNTRY)
+    if cc:
+        return cc in countries
+    return in_countries(r.get("lat"), r.get("lon"), countries) is not False
 
 
-def purge_outside_nz(conn) -> int:
-    """Remove stored locations and cached lookups that fall outside New Zealand."""
+def purge_outside(conn, countries) -> int:
+    """Remove stored locations and cached lookups that fall outside the allowed countries."""
     removed = 0
     for row in conn.execute("SELECT id, lat, lon FROM message_locations").fetchall():
-        if not in_nz(row["lat"], row["lon"]):
+        if in_countries(row["lat"], row["lon"], countries) is False:
             conn.execute("DELETE FROM message_locations WHERE id = ?", (row["id"],))
             removed += 1
     for row in conn.execute("SELECT key, result FROM geocode_cache WHERE result != ''").fetchall():
         try:
-            ok = _nz_result(json.loads(row["result"]))
+            ok = result_ok(json.loads(row["result"]), countries)
         except ValueError:
             ok = False
         if not ok:
@@ -329,10 +370,12 @@ def resolve(message: str, cfg: dict, geocoder: Geocoder, notes: list | None = No
     if not ext:
         return None
     if ext.kind == "coords":
-        if not in_nz(ext.lat, ext.lon):
+        countries = parse_countries(cfg.get("loc_countries"))
+        if in_countries(ext.lat, ext.lon, countries) is False:
+            where = countries_text(countries)
             if notes is not None:
-                notes.append(f"coordinates {ext.lat}, {ext.lon} are outside New Zealand, so they were ignored")
-            log.info("ignoring coordinates outside New Zealand: %s", ext.raw)
+                notes.append(f"coordinates {ext.lat}, {ext.lon} are outside {where}, so they were ignored")
+            log.info("ignoring coordinates outside %s: %s", where, ext.raw)
             return None
         return {"lat": ext.lat, "lon": ext.lon, "radius_m": 0, "precision": "point",
                 "label": f"{ext.lat:.5f}, {ext.lon:.5f}", "display": "", "query": ext.raw}

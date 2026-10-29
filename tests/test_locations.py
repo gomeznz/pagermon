@@ -194,9 +194,45 @@ def test_purge_outside_nz():
                  (json.dumps({"lat": "-33.87", "lon": "151.21"}), now))
     conn.execute("INSERT OR REPLACE INTO geocode_cache (key, result, ts) VALUES ('k-nz', ?, ?)",
                  (json.dumps({"lat": "-46.41", "lon": "168.35"}), now))
-    assert locations.purge_outside_nz(conn) >= 1
+    assert locations.purge_outside(conn, ["nz"]) >= 1
     kept = {r["message_id"] for r in conn.execute("SELECT message_id FROM message_locations")}
     assert ids[0] in kept and ids[1] not in kept
     keys = {r["key"] for r in conn.execute("SELECT key FROM geocode_cache")}
     assert "k-nz" in keys and "k-au" not in keys
     conn.close()
+
+
+def test_parse_countries():
+    assert locations.parse_countries("") == ["nz"] and locations.parse_countries(None) == ["nz"]
+    assert locations.parse_countries("NZ, au;au  fj") == ["nz", "au", "fj"]
+    assert locations.parse_countries("new zealand") == ["nz"]          # junk words ignored → default
+    assert locations.countries_text(["nz", "au", "fj"]) == "New Zealand, Australia and Fiji"
+
+
+def test_several_countries():
+    both = ["nz", "au"]
+    assert locations.in_countries(-33.87, 151.21, both) is True        # Sydney
+    assert locations.in_countries(-46.41, 168.35, both) is True        # Invercargill
+    assert locations.in_countries(-29.04, 167.95, both) is False       # Norfolk Island: neither
+    # a country with no outline: points can't be judged, so they aren't thrown away
+    assert locations.in_countries(-18.14, 178.44, ["nz", "fj"]) is None
+    # geocoder answers that name their country are judged by that
+    assert locations.result_ok({"lat": "-18.14", "lon": "178.44", "address": {"country_code": "fj"}}, ["nz", "fj"])
+    assert not locations.result_ok({"lat": "-33.87", "lon": "151.21", "address": {"country_code": "au"}}, ["nz"])
+    # coordinates in a page follow the list
+    cfg = dict(locations.DEFAULTS, loc_countries="nz,au")
+    assert resolve("MEET AT -33.8688, 151.2093 NOW", cfg, None)["precision"] == "point"
+
+
+def test_geocoder_sends_all_listed_countries_and_keeps_caches_apart():
+    conn = db.connect()
+    conn.execute("DELETE FROM geocode_cache")
+    conn.close()
+    calls = []
+    cfg = dict(locations.DEFAULTS, loc_countries="nz,au")
+    geo = Geocoder(db.connect, cfg, fetch=_overseas_fetch(calls))
+    r = resolve("CAR FIRE 5 GEORGE ST", cfg, geo)
+    assert r and "countrycodes=nz%2Cau" in calls[0]                    # Sydney accepted for nz,au
+    # the same lookup with NZ only is a separate cache entry, and Sydney is rejected
+    nz = dict(locations.DEFAULTS, loc_countries="nz")
+    assert resolve("CAR FIRE 5 GEORGE ST", nz, Geocoder(db.connect, nz, fetch=_overseas_fetch(calls))) is None

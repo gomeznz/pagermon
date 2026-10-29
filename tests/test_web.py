@@ -853,3 +853,26 @@ def test_pushover_send_modes_personal_and_debug_lines(app, monkeypatch):
             db.set_setting(conn, k, "")
         db.set_setting(conn, "pushover_send", "alerts")
         conn.close()
+
+
+def test_location_countries_setting(app):
+    c = TestClient(app)
+    login(c, "alex")
+    token = csrf_of(c.get("/config").text)
+    base = {"csrf": token, "loc_geocoder": "https://nominatim.openstreetmap.org/search",
+            "map_tiles": "https://tile.openstreetmap.org/{z}/{x}/{y}.png"}
+    conn = db.connect()
+    try:
+        c.post("/config/locations", data=dict(base, loc_countries="nz, au"))
+        assert db.get_setting(conn, "loc_countries") == "nz,au"
+        page = c.get("/config").text
+        assert "New Zealand and Australia" in page
+        c.post("/config/locations", data=dict(base, loc_countries="new zealand"))   # not codes: refused
+        assert db.get_setting(conn, "loc_countries") == "nz,au"
+        c.post("/config/locations", data=dict(base, loc_countries="nz, fj"))
+        assert "can&#39;t be checked for Fiji" in c.get("/config").text or "can't be checked for Fiji" in c.get("/config").text
+        c.post("/config/locations", data=dict(base, loc_countries=""))              # blank → New Zealand
+        assert db.get_setting(conn, "loc_countries") == "nz"
+    finally:
+        db.set_setting(conn, "loc_countries", "nz")
+        conn.close()

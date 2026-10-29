@@ -595,6 +595,3 @@ main.map-main { display: flex; flex-direction: column; }
 .svc-opt:has(input:checked) span { border-color: var(--text); border-style: solid; color: var(--text); box-shadow: 0 0 0 1px var(--text); }
 .svc-opt:has(input:focus-visible) span { outline: 2px solid var(--accent); outline-offset: 2px; }
 .warn-text { color: var(--warn, #b45309); font-weight: 600; }
-.nz-only { display: flex; flex-direction: column; gap: 0.2rem; justify-content: center; padding: 0.55rem 0.8rem;
-  border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; font-size: 0.92rem; }
-.nz-only small { color: var(--muted); }

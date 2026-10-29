@@ -250,15 +250,17 @@ class Decoder:
             self.loc_cfg, self.loc_worker = {}, None
         self.loc_cfg.clear()
         self.loc_cfg.update(cfg)
-        if not getattr(self, "_nz_checked", False):   # once per start: drop anything stored outside NZ
-            self._nz_checked = True
-            removed = locations.purge_outside_nz(self.conn)
+        countries = locations.parse_countries(self.loc_cfg.get("loc_countries"))
+        if getattr(self, "_countries_checked", None) != countries:   # at start and whenever the list changes
+            self._countries_checked = countries
+            removed = locations.purge_outside(self.conn, countries)
             if removed:
-                log.info("removed %d stored location(s) outside New Zealand", removed)
+                where = locations.countries_text(countries)
+                log.info("removed %d stored location(s) outside %s", removed, where)
                 q = getattr(self, "debug", None)
                 if q is not None:
                     q.put((time.time(), None, "", "decoder", "info",
-                           f"Locations: removed {removed} stored location{'s' if removed != 1 else ''} outside New Zealand"))
+                           f"Locations: removed {removed} stored location{'s' if removed != 1 else ''} outside {where}"))
         if self.loc_cfg.get("loc_enabled") == "1" and self.loc_worker is None:
             self.loc_worker = locations.LocationWorker(db.connect, self.loc_cfg)
             self.loc_worker.start()

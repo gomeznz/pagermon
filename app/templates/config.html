@@ -190,8 +190,8 @@
     <label class="check span2"><input type="checkbox" name="loc_enabled" value="1" {% if loc.loc_enabled == '1' %}checked{% endif %}> Look up locations in new pages</label>
     <label>Default town or region <input name="loc_region" value="{{ loc.loc_region }}" placeholder="e.g. Invercargill or Southland">
       <small>Used when a page gives a street without a town.</small></label>
-    <div class="nz-only"><strong>New Zealand only</strong>
-      <small>Lookups only search New Zealand, and any result outside it (including coordinates in a page) is ignored. Covers Stewart Island, the Chatham Islands and outlying islands.</small></div>
+    <label>Countries <input name="loc_countries" value="{{ loc.loc_countries or 'nz' }}" placeholder="nz" spellcheck="false">
+      <small>Two-letter codes, comma separated, e.g. <span class="mono">nz</span> or <span class="mono">nz, au</span>. Lookups only search {{ loc_countries_text }}, and results outside {{ 'it' if loc_countries_list|length == 1 else 'them' }} (including coordinates in a page) are ignored. Blank means New Zealand.{% if loc_unchecked %} Coordinates can't be checked for {{ loc_unchecked }}.{% endif %}</small></label>
     <label class="span2">Location markers <input name="loc_markers" class="mono" value="{{ loc.loc_markers }}">
       <small>If your pages put the address after a word like <span class="mono">LOC:</span> or <span class="mono">@</span>, list them here (comma separated). Without one, addresses are found by their street type (St, Rd, Ave, Cres, SH1&hellip;).</small></label>
     <details class="span2">

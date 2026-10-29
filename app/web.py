@@ -485,6 +485,10 @@ def create_app() -> FastAPI:
                           s=s, push_priorities=pushover.PRIORITIES, push_modes=pushover.SEND_MODES,
                           protocols=VALID_PROTOCOLS, kiosks=kiosks, base_url=base_url,
                           personal_kiosks=personal_kiosks, loc=loc, loc_stats=loc_stats,
+                          loc_countries_list=locations.parse_countries(loc.get("loc_countries")),
+                          loc_countries_text=locations.countries_text(locations.parse_countries(loc.get("loc_countries"))),
+                          loc_unchecked=", ".join(locations.country_name(c) for c in locations.parse_countries(loc.get("loc_countries"))
+                                                  if c not in locations.COUNTRY_BOXES),
                           loc_test=loc_test, page_name="config")
         finally:
             conn.close()
@@ -603,13 +607,17 @@ def create_app() -> FastAPI:
             vals = {
                 "loc_enabled": "1" if loc_enabled else "0",
                 "loc_geocoder": loc_geocoder.strip() or locations.DEFAULTS["loc_geocoder"],
-                "loc_countries": "nz",   # lookups are always limited to New Zealand
+                "loc_countries": ",".join(locations.parse_countries(loc_countries)),   # blank = New Zealand
                 "loc_region": " ".join(loc_region.split())[:60],
                 "loc_markers": loc_markers.strip()[:200],
                 "loc_email": loc_email.strip()[:120],
                 "map_tiles": map_tiles.strip() or locations.DEFAULTS["map_tiles"],
                 "map_attribution": map_attribution.strip()[:200] or locations.DEFAULTS["map_attribution"],
             }
+            bad = [c for c in re.split(r"[\s,;]+", loc_countries.strip()) if c and not re.fullmatch(r"[A-Za-z]{2}", c)]
+            if bad:
+                flash(request, f"Countries must be two-letter codes such as nz or au (not \u201c{bad[0]}\u201d).", "error")
+                return back("/config#locations")
             for key in ("loc_geocoder", "map_tiles"):
                 if not re.match(r"^https?://[^\s]+$", vals[key]):
                     flash(request, "The geocoder and map tile addresses must start with http:// or https://", "error")
@@ -622,7 +630,8 @@ def create_app() -> FastAPI:
                     db.set_setting(conn, k, v)
                 db.bump_rules_version(conn)
                 db.audit(conn, user["username"], "locations_update",
-                         f"enabled={vals['loc_enabled']} region={vals['loc_region'] or '-'}")
+                         f"enabled={vals['loc_enabled']} region={vals['loc_region'] or '-'} "
+                         f"countries={vals['loc_countries']}")
             flash(request, "Location settings saved." + (" New pages with an address will appear on the Map."
                                                           if vals["loc_enabled"] == "1" else ""))
             return back("/config#locations")
@@ -647,7 +656,8 @@ def create_app() -> FastAPI:
             except Exception as exc:
                 error = f"Lookup failed: {exc}"[:200]
             if not result and geo.rejected:
-                notes.append(f"the geocoder suggested \u201c{geo.rejected}\u201d, which is outside New Zealand, so it was ignored")
+                notes.append(f"the geocoder suggested \u201c{geo.rejected}\u201d, which is outside "
+                             f"{locations.countries_text(locations.parse_countries(cfg.get('loc_countries')))}, so it was ignored")
         found = ""
         if ext and ext.kind == "coords":
             found = f"coordinates {ext.lat}, {ext.lon}"
