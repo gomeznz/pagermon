@@ -131,9 +131,13 @@ Alert pages can go straight to the [Pushover](https://pushover.net) app, no rela
 2. In **Config → Pushover**, paste both and press **Save & send test**.
 3. Optionally set a **Link address** (e.g. your Cloudflare Tunnel address) to add an "Open in MultipagePlus" link to each notification.
 
+**Send** chooses which pages go: **Alert pages only** (the default: capcodes or keywords with **Alert** ticked on the Capcodes page) or **All pages** (everything that isn't suppressed; watch Pushover's monthly allowance on a busy network). The card shows how many rules have Alert ticked, and warns when none do.
+
 Each notification's title is the capcode label with its service icon (🔥 / 👮 / 🚑) and channel; the message is the page text plus any matched keywords. **Priority** defaults to High, which sounds through quiet hours; Normal and Quiet are also available.
 
-Every user can also get their own **Alert me** pages under **My kiosks → Pushover**. With a shared application set up they only need their user key; otherwise they can enter their own application token.
+Every user can also get Pushover notifications under **My kiosks → Pushover**: shared alerts on capcodes they can see plus their own **Alert me** ticks (or every page they can see, in All pages mode). Someone whose key is also the shared key gets one notification, not two. With a shared application set up they only need their user key; otherwise they can enter their own application token.
+
+**Troubleshooting:** open the **Debug console**. Each time settings or rules change it shows a "Pushover ready" line saying what will be sent (highlighted if nothing has Alert ticked), and every notification adds a line saying it was sent, or why Pushover refused it.
 
 Saved keys are never shown in full on the page. Notifications are sent one at a time in the background; a server or network error is retried once after a few seconds, and a refusal such as a bad key or a used-up monthly quota is logged in the decoder log (`journalctl -u pager-decoder`). Pushover's free tier allows 10,000 messages a month per application.
 

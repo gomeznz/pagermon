@@ -255,12 +255,13 @@ class Decoder:
             self.loc_worker.start()
         # Users with their own alert webhook: (user row, their personal view, parsed filter)
         self.push = {k: db.get_setting(self.conn, k).strip() for k in
-                     ("pushover_token", "pushover_user", "pushover_priority", "public_url")}
+                     ("pushover_token", "pushover_user", "pushover_priority", "pushover_send", "public_url")}
         self.personal = []
         for u in self.conn.execute(
                 "SELECT * FROM users WHERE active = 1 AND (notify_url != '' OR pushover_user != '')").fetchall():
             self.personal.append((dict(u), kwrules.load_view(self.conn, u["id"]),
                                   auth.parse_capcode_filter(u["capcode_filter"])))
+        self._push_status()
 
     def load_config(self) -> None:
         self.config_version = db.get_setting(self.conn, "config_version")
@@ -335,9 +336,14 @@ class Decoder:
             ).start()
         page_info = {"ts": ts, "channel": ch["name"], "capcode": page.capcode,
                      "type": page.msg_type, "message": page.message}
-        if res.alert and self.push.get("pushover_token") and self.push.get("pushover_user"):
-            self.pushover(self.push["pushover_token"], self.push["pushover_user"], page_info,
-                          alias.get("label", ""), res.service, res.keywords, "shared")
+        send_all = self.push.get("pushover_send") == "all"
+        meta = (ch["id"], ch["name"])
+        shared_key = self.push.get("pushover_user") if self.push.get("pushover_token") else ""
+        shared_sent = False
+        if shared_key and (res.alert or (send_all and not res.suppressed)):
+            self.pushover(self.push["pushover_token"], shared_key, page_info, alias.get("label", ""),
+                          res.service, res.keywords, "shared", res.alert, meta)
+            shared_sent = True
         # Personal alerts go to each user's own webhook, only for pages they may see.
         for u, view, ranges in self.personal:
             if not auth.capcode_matches(ranges, page.capcode):
@@ -345,6 +351,14 @@ class Decoder:
             shown = kwrules.apply_view(page.message, page.capcode, view, alias.get("alert", 0),
                                        alias.get("suppress", 0), alias.get("colour", ""),
                                        alias.get("label", ""), alias.get("service", "") or "")
+            # Personal Pushover: pages that alert for this user (shared alerts they can see,
+            # plus their own Alert me), or every page they can see in "all pages" mode.
+            token = u.get("pushover_token") or self.push.get("pushover_token")
+            if (u.get("pushover_user") and token and (shown.alert or (send_all and not shown.suppressed))
+                    and not (shared_sent and u["pushover_user"] == shared_key)):
+                self.pushover(token, u["pushover_user"], page_info, shown.label, shown.service,
+                              shown.keywords, u["username"], shown.alert, meta)
+            # Personal webhooks keep to the user's own Alert me rules.
             if shown.personal_alert:
                 payload = {
                     "id": cur.lastrowid, "ts": ts, "channel": ch["name"], "user": u["username"],
@@ -353,21 +367,51 @@ class Decoder:
                 }
                 if u.get("notify_url"):
                     threading.Thread(target=send_webhook, args=(u["notify_url"], payload), daemon=True).start()
-                token = u.get("pushover_token") or self.push.get("pushover_token")
-                if u.get("pushover_user") and token:
-                    self.pushover(token, u["pushover_user"], page_info, shown.label, shown.service,
-                                  shown.keywords, u["username"])
 
     def pushover(self, token: str, user: str, page_info: dict, label: str, service: str,
-                 keywords, who: str) -> None:
+                 keywords, who: str, is_alert: bool = True, meta=None) -> None:
         if getattr(self, "push_sender", None) is None:
-            self.push_sender = pushover.Sender()
+            self.push_sender = pushover.Sender(report=self._push_report)
             self.push_sender.start()
         base = self.push.get("public_url", "").rstrip("/")
         link = f"{base}/history?capcode={page_info['capcode']}" if base else ""
+        prio = pushover.priority_for(self.push.get("pushover_priority", "1"), is_alert)
         fields = pushover.build(page_info, label=label, service=service, keywords=keywords,
-                                priority=self.push.get("pushover_priority", "1"), link=link)
-        self.push_sender.enqueue(token, user, fields, who)
+                                priority=prio, link=link)
+        self.push_sender.enqueue(token, user, fields, who, meta)
+
+    def _debug_event(self, kind: str, text: str, meta=None) -> None:
+        """Add a line to the Debug console (shown as an event)."""
+        q = getattr(self, "debug", None)
+        if q is not None:
+            cid, cname = meta or (None, "")
+            q.put((time.time(), cid, cname, "decoder", kind, text[:2000]))
+
+    def _push_report(self, ok: bool, who: str, fields: dict, detail: str, meta) -> None:
+        title = fields.get("title", "")
+        if ok:
+            self._debug_event("info", f"Pushover to {who}: sent \u201c{title}\u201d", meta)
+        else:
+            self._debug_event("error", f"Pushover to {who} failed: {detail} (\u201c{title}\u201d)", meta)
+
+    def _push_status(self) -> None:
+        """Say in the Debug console what Pushover will do, whenever settings or rules reload."""
+        mode = pushover.SEND_MODES.get(self.push.get("pushover_send") or "alerts", "Alert pages only").lower()
+        shared = bool(self.push.get("pushover_token") and self.push.get("pushover_user"))
+        people = [u["username"] for u, _, _ in self.personal
+                  if u.get("pushover_user") and (u.get("pushover_token") or self.push.get("pushover_token"))]
+        if not shared and not people:
+            return
+        n_alert = self.conn.execute("SELECT COUNT(*) FROM aliases WHERE alert = 1 AND suppress = 0").fetchone()[0] \
+            + self.conn.execute("SELECT COUNT(*) FROM keywords WHERE alert = 1").fetchone()[0]
+        parts = [f"Pushover ready: {mode}"]
+        parts.append("shared on" if shared else "shared off")
+        if people:
+            parts.append("personal: " + ", ".join(people))
+        if (self.push.get("pushover_send") or "alerts") == "alerts":
+            parts.append(f"{n_alert} shared capcode/keyword rule{'s' if n_alert != 1 else ''} with Alert ticked")
+        self._debug_event("info" if (n_alert or people or self.push.get("pushover_send") == "all") else "error",
+                          "; ".join(parts))
 
     def apply_status(self, channel_id: int, state: str, detail: str) -> None:
         self.conn.execute(

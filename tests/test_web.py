@@ -776,3 +776,80 @@ def test_pushover_settings_and_alerts(app, monkeypatch):
         for k in ("pushover_token", "pushover_user", "public_url"):
             db.set_setting(conn, k, "")
         conn.close()
+
+
+def test_pushover_send_modes_personal_and_debug_lines(app, monkeypatch):
+    import queue as _q
+    from tests.test_pushover import FakePushover, TOKEN, USER
+    from app import pushover
+    from app.decoder import Decoder
+    from app.parser import parse_line
+    fake = FakePushover()
+    monkeypatch.setattr(pushover, "API_URL", fake.url)
+    conn = db.connect()
+    _reset_personal(conn)
+    vid = conn.execute("SELECT id FROM users WHERE username='viewer1'").fetchone()[0]
+    vkey = "v" * 29 + "4"
+
+    def run(lines, wait_for):
+        fake.requests.clear()
+        for ln in lines:
+            d.store(ch, parse_line(ln), time.time())
+        for _ in range(150):
+            if len(fake.requests) >= wait_for:
+                break
+            time.sleep(0.02)
+        time.sleep(0.15)
+        return list(fake.requests)
+    try:
+        for k, v in (("pushover_token", TOKEN), ("pushover_user", USER), ("pushover_send", "alerts"),
+                     ("pushover_priority", "1")):
+            db.set_setting(conn, k, v)
+        conn.execute("INSERT INTO aliases (capcode, label, alert) VALUES ('1500', 'Station 41', 1)")
+        conn.execute("INSERT INTO aliases (capcode, label, suppress) VALUES ('5555', 'Noisy', 1)")
+        conn.execute("UPDATE users SET pushover_user = ? WHERE id = ?", (vkey, vid))
+        d = Decoder.__new__(Decoder)
+        d.conn, d.loc_cfg, d.loc_worker, d.dedupe_seconds, d.recent = conn, {}, None, 0, {}
+        d.debug = _q.Queue()
+        d.load_rules()
+        ch = {"id": 1, "name": "Bench", "freq_hz": 157450000}
+        status = [r[5] for r in list(d.debug.queue) if "Pushover ready" in r[5]]
+        assert status and "alert pages only" in status[0] and "viewer1" in status[0]
+        # alerts mode: the shared alert goes to the shared key AND to viewer1 (1500 is in their filter)
+        sent = run(["POCSAG1200: Address: 1500  Function: 3  Alpha:   SMOKE ALARM",
+                    "POCSAG1200: Address: 1600  Function: 3  Alpha:   routine page"], 2)
+        assert sorted(r["user"] for r in sent) == sorted([USER, vkey]) and all(r["priority"] == 1 for r in sent)
+        # the same key on both shared and personal gets one notification, not two
+        conn.execute("UPDATE users SET pushover_user = ? WHERE id = ?", (USER, vid))
+        d.load_rules()
+        sent = run(["POCSAG1200: Address: 1500  Function: 3  Alpha:   SMOKE ALARM 2"], 1)
+        assert [r["user"] for r in sent] == [USER]
+        conn.execute("UPDATE users SET pushover_user = ? WHERE id = ?", (vkey, vid))
+        # all-pages mode: ordinary pages go at Normal priority; suppressed and out-of-filter pages don't
+        db.set_setting(conn, "pushover_send", "all")
+        d.load_rules()
+        sent = run(["POCSAG1200: Address: 1600  Function: 3  Alpha:   routine page",
+                    "POCSAG1200: Address: 5555  Function: 3  Alpha:   noisy suppressed",
+                    "POCSAG1200: Address: 9999  Function: 3  Alpha:   outside viewer filter"], 4)
+        got = sorted((r["user"], r["message"][:7], r["priority"]) for r in sent)
+        assert got == sorted([(USER, "routine", 0), (vkey, "routine", 0), (USER, "outside", 0)])
+        # the Debug console gets a line per notification, and failures say why
+        fake.replies.append((400, {"status": 0, "errors": ["application token is invalid"]}))
+        run(["POCSAG1200: Address: 1700  Function: 3  Alpha:   last one"], 2)
+        time.sleep(0.2)
+        lines = [r for r in list(d.debug.queue)]
+        texts = [r[5] for r in lines]
+        assert any(t.startswith("Pushover to shared: sent") for t in texts)
+        assert any(t.startswith("Pushover to viewer1: sent") for t in texts)
+        bad = [r for r in lines if "failed: application token is invalid" in r[5]]
+        assert bad and bad[0][4] == "error" and bad[0][2] == "Bench"
+        assert not any(TOKEN in t or USER in t or vkey in t for t in texts)   # keys never logged
+        d.push_sender.stop()
+    finally:
+        fake.close()
+        conn.execute("DELETE FROM aliases WHERE capcode IN ('1500', '5555')")
+        conn.execute("UPDATE users SET pushover_user = '', pushover_token = ''")
+        for k in ("pushover_token", "pushover_user", "public_url"):
+            db.set_setting(conn, k, "")
+        db.set_setting(conn, "pushover_send", "alerts")
+        conn.close()

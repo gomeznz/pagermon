@@ -24,6 +24,13 @@ API_URL = os.environ.get("PAGER_PUSHOVER_API", "https://api.pushover.net/1/messa
 KEY_RE = re.compile(r"^[A-Za-z0-9]{30}$")
 SERVICE_ICON = {"fire": "\U0001F525", "police": "\U0001F46E", "ambulance": "\U0001F691"}
 PRIORITIES = {"-1": "Quiet (no sound)", "0": "Normal", "1": "High (bypasses quiet hours)"}
+SEND_MODES = {"alerts": "Alert pages only", "all": "All pages (except suppressed)"}
+
+
+def priority_for(chosen: str, is_alert: bool) -> str:
+    """Alert pages use the chosen priority; other pages (in "all pages" mode) are Normal, or Quiet if chosen."""
+    chosen = chosen if chosen in PRIORITIES else "1"
+    return chosen if is_alert else ("-1" if chosen == "-1" else "0")
 
 
 def valid_key(value: str) -> bool:
@@ -75,17 +82,20 @@ def send(token: str, user: str, fields: dict, timeout: float = 10) -> tuple[bool
 class Sender(threading.Thread):
     """Sends queued notifications one at a time, retrying once on server or network errors."""
 
-    def __init__(self, retry_wait: float = 6.0):
+    def __init__(self, retry_wait: float = 6.0, report=None):
         super().__init__(name="pushover", daemon=True)
         self.q: queue.Queue = queue.Queue(maxsize=500)
         self.retry_wait = retry_wait
+        self.report = report          # report(ok, who, fields, detail, meta) after each notification
         self.stopping = threading.Event()
 
-    def enqueue(self, token: str, user: str, fields: dict, who: str = "shared") -> None:
+    def enqueue(self, token: str, user: str, fields: dict, who: str = "shared", meta=None) -> None:
         try:
-            self.q.put_nowait((token, user, fields, who))
+            self.q.put_nowait((token, user, fields, who, meta))
         except queue.Full:
             log.warning("pushover queue full; dropping a %s notification", who)
+            if self.report:
+                self.report(False, who, fields, "queue full (more than 500 waiting), dropped", meta)
 
     def stop(self) -> None:
         self.stopping.set()
@@ -96,10 +106,16 @@ class Sender(threading.Thread):
             item = self.q.get()
             if item is None:
                 break
-            token, user, fields, who = item
+            token, user, fields, who, meta = item
             ok, retry, detail = send(token, user, fields)
             if not ok and retry:
                 self.stopping.wait(self.retry_wait)
                 ok, retry, detail = send(token, user, fields)
+                detail = detail if ok else detail + " (after one retry)"
             if not ok:
                 log.warning("pushover (%s) failed: %s", who, detail)
+            if self.report:
+                try:
+                    self.report(ok, who, fields, detail, meta)
+                except Exception:  # never let reporting stop the sender
+                    log.exception("pushover report failed")

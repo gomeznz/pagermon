@@ -594,3 +594,4 @@ main.map-main { display: flex; flex-direction: column; }
 .svc-opt.none span { border-style: dashed; }
 .svc-opt:has(input:checked) span { border-color: var(--text); border-style: solid; color: var(--text); box-shadow: 0 0 0 1px var(--text); }
 .svc-opt:has(input:focus-visible) span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.warn-text { color: var(--warn, #b45309); font-weight: 600; }

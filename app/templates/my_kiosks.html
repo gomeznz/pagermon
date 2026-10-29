@@ -54,7 +54,7 @@
 
 <section class="card" id="my-pushover">
   <h2>Pushover {% if user.pushover_user and (user.pushover_token or push_shared) %}<span class="tag ok">on</span>{% else %}<span class="tag">off</span>{% endif %}</h2>
-  <p class="muted">Get your <strong>Alert me</strong> pages as notifications in the <a href="https://pushover.net" target="_blank" rel="noopener">Pushover</a> app. {% if push_shared %}An application is already set up, so you only need your <strong>user key</strong> from your pushover.net dashboard.{% else %}Enter your <strong>user key</strong> and an <strong>application token</strong> (create an application at pushover.net), or ask an admin to set up a shared application.{% endif %}</p>
+  <p class="muted">Get notifications in the <a href="https://pushover.net" target="_blank" rel="noopener">Pushover</a> app for {% if push_all %}<strong>every page you can see</strong> (except ones you've suppressed){% else %}pages that <strong>alert</strong> for you: shared alerts on capcodes you can see, plus anything you've ticked <strong>Alert me</strong> on under <a href="/my">My capcodes</a>{% endif %}. {% if push_shared %}An application is already set up, so you only need your <strong>user key</strong> from your pushover.net dashboard.{% else %}Enter your <strong>user key</strong> and an <strong>application token</strong> (create an application at pushover.net), or ask an admin to set up a shared application.{% endif %}</p>
   <form method="post" action="/my/pushover" class="grid">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label>Your user key <input name="pushover_user" class="mono" autocomplete="off" spellcheck="false" maxlength="30" placeholder="{{ user.pushover_user|pushmask or 'Paste your user key' }}">

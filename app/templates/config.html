@@ -242,18 +242,23 @@
 
 <section class="card" id="pushover">
   <h2>Pushover {% if s.pushover_token and s.pushover_user %}<span class="tag ok">on</span>{% else %}<span class="tag">off</span>{% endif %}</h2>
-  <p class="muted">Sends alert pages straight to the <a href="https://pushover.net" target="_blank" rel="noopener">Pushover</a> app on your phones, alongside (or instead of) the webhook. Create an application at pushover.net to get an <strong>application token</strong>, and use your <strong>user key</strong>, or a delivery group's key to reach several people. Each notification shows the capcode's label and service icon as its title and the page text as the message. Users can also add their own Pushover key under My kiosks; they use this application token unless they enter their own. Pushover's free tier allows 10,000 messages a month per application.</p>
+  <p class="muted">Sends pages straight to the <a href="https://pushover.net" target="_blank" rel="noopener">Pushover</a> app on your phones, alongside (or instead of) the webhook. Create an application at pushover.net to get an <strong>application token</strong>, and use your <strong>user key</strong>, or a delivery group's key to reach several people. Each notification shows the capcode's label and service icon as its title and the page text as the message. Users can also add their own Pushover key under My kiosks; they use this application token unless they enter their own. Pushover's free tier allows 10,000 messages a month per application. Every notification sent or refused is listed in the <a href="/debug" target="_blank" rel="noopener">Debug console</a>.</p>
   <form method="post" action="/config/pushover" class="grid">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label>Application token <input name="pushover_token" class="mono" autocomplete="off" spellcheck="false" maxlength="30" placeholder="{{ s.pushover_token|pushmask or 'Paste your application token' }}">
       <small>{% if s.pushover_token %}Saved. Leave blank to keep it.{% else %}30 letters and numbers, from your application's page.{% endif %}</small></label>
     <label>User or group key <input name="pushover_user" class="mono" autocomplete="off" spellcheck="false" maxlength="30" placeholder="{{ s.pushover_user|pushmask or 'Paste your user key' }}">
       <small>{% if s.pushover_user %}Saved. Leave blank to keep it.{% else %}Shown on your pushover.net dashboard.{% endif %}</small></label>
+    <label>Send
+      <select name="pushover_send">
+        {% for k, v in push_modes.items() %}<option value="{{ k }}" {% if (s.pushover_send or 'alerts') == k %}selected{% endif %}>{{ v }}</option>{% endfor %}
+      </select>
+      <small>{% if (s.pushover_send or 'alerts') == 'alerts' %}Pages from capcodes or keywords with <strong>Alert</strong> ticked{% if s.n_alert_rules == 0 %} &mdash; <span class="warn-text">none are ticked yet, so nothing will be sent</span>{% else %} ({{ s.n_alert_rules }} rule{{ '' if s.n_alert_rules == 1 else 's' }}){% endif %}.{% else %}Every page that isn't suppressed. Busy networks can use up Pushover's monthly allowance quickly.{% endif %} Applies to personal Pushover too.</small></label>
     <label>Priority
       <select name="pushover_priority">
         {% for k, v in push_priorities.items() %}<option value="{{ k }}" {% if s.pushover_priority == k %}selected{% endif %}>{{ v }}</option>{% endfor %}
       </select>
-      <small>Applies to shared and personal Pushover alerts.</small></label>
+      <small>For alert pages. Other pages (with "All pages") go at Normal, or Quiet if chosen here.</small></label>
     <label>Link address <input name="public_url" class="mono" value="{{ s.public_url }}" placeholder="https://pager.example.com">
       <small>Optional. Adds an "Open in MultipagePlus" link to each notification.</small></label>
     <div class="span2 form-actions">

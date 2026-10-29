@@ -101,3 +101,9 @@ def test_sender_retries_once_after_server_error(fake):
     threading.Event().wait(0.3)
     s2.stop()
     assert len(fake.requests) == 1
+
+
+def test_priority_for():
+    assert pushover.priority_for("1", True) == "1" and pushover.priority_for("1", False) == "0"
+    assert pushover.priority_for("-1", False) == "-1" and pushover.priority_for("0", True) == "0"
+    assert pushover.priority_for("junk", True) == "1"

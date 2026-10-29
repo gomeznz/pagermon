@@ -204,6 +204,7 @@ DEFAULT_SETTINGS = {
     "pushover_token": "",
     "pushover_user": "",
     "pushover_priority": "1",
+    "pushover_send": "alerts",
     "public_url": "",
 }
 

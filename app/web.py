@@ -472,7 +472,9 @@ def create_app() -> FastAPI:
                 editing = conn.execute("SELECT * FROM channels WHERE id = ?", (edit,)).fetchone()
             s = {k: db.get_setting(conn, k) for k in ("retention_days", "dedupe_seconds", "webhook_url",
                                                       "pushover_token", "pushover_user", "pushover_priority",
-                                                      "public_url")}
+                                                      "pushover_send", "public_url")}
+            s["n_alert_rules"] = (conn.execute("SELECT COUNT(*) FROM aliases WHERE alert = 1 AND suppress = 0").fetchone()[0]
+                                  + conn.execute("SELECT COUNT(*) FROM keywords WHERE alert = 1").fetchone()[0])
             kiosks = conn.execute("SELECT * FROM kiosks WHERE owner_id IS NULL "
                                   "ORDER BY name COLLATE NOCASE").fetchall()
             personal_kiosks = conn.execute(
@@ -480,7 +482,8 @@ def create_app() -> FastAPI:
                 "ORDER BY u.username COLLATE NOCASE, k.name COLLATE NOCASE").fetchall()
             base_url = str(request.base_url).rstrip("/")
             return render(request, "config.html", user, channels=channels, editing=editing,
-                          s=s, push_priorities=pushover.PRIORITIES, protocols=VALID_PROTOCOLS, kiosks=kiosks, base_url=base_url,
+                          s=s, push_priorities=pushover.PRIORITIES, push_modes=pushover.SEND_MODES,
+                          protocols=VALID_PROTOCOLS, kiosks=kiosks, base_url=base_url,
                           personal_kiosks=personal_kiosks, loc=loc, loc_stats=loc_stats,
                           loc_test=loc_test, page_name="config")
         finally:
@@ -688,7 +691,8 @@ def create_app() -> FastAPI:
     @app.post("/config/pushover")
     async def save_pushover(request: Request, csrf: str = Form(""), pushover_token: str = Form(""),
                             pushover_user: str = Form(""), pushover_priority: str = Form("1"),
-                            public_url: str = Form(""), clear: str = Form(""), test: str = Form("")):
+                            pushover_send: str = Form("alerts"), public_url: str = Form(""),
+                            clear: str = Form(""), test: str = Form("")):
         check_csrf(request, csrf)
         conn, user = require_user(request, admin=True)
         try:
@@ -705,13 +709,14 @@ def create_app() -> FastAPI:
                 flash(request, "The link address must start with http:// or https://", "error")
                 return back("/config#pushover")
             prio = pushover_priority if pushover_priority in pushover.PRIORITIES else "1"
+            mode = pushover_send if pushover_send in pushover.SEND_MODES else "alerts"
             with db.transaction(conn):
                 for k, v in (("pushover_token", token), ("pushover_user", ukey),
-                             ("pushover_priority", prio), ("public_url", public_url)):
+                             ("pushover_priority", prio), ("pushover_send", mode), ("public_url", public_url)):
                     db.set_setting(conn, k, v)
                 db.bump_rules_version(conn)
                 db.audit(conn, user["username"], "pushover_settings",
-                         f"{'on' if token and ukey else 'off'}, priority {prio}"
+                         f"{'on' if token and ukey else 'off'}, {mode}, priority {prio}"
                          f"{', link ' + public_url if public_url else ''}")
             if test:
                 if not (token and ukey):
@@ -968,6 +973,7 @@ def create_app() -> FastAPI:
         try:
             return render(request, "my_kiosks.html", user, kiosks=_my_kiosks(conn, user["id"]),
                           push_shared=bool(db.get_setting(conn, "pushover_token")),
+                          push_all=db.get_setting(conn, "pushover_send") == "all",
                           kiosk_limit=_kiosk_limit(user),
                           base_url=str(request.base_url).rstrip("/"), page_name="mykiosks")
         finally:
