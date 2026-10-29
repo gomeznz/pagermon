@@ -190,8 +190,8 @@
     <label class="check span2"><input type="checkbox" name="loc_enabled" value="1" {% if loc.loc_enabled == '1' %}checked{% endif %}> Look up locations in new pages</label>
     <label>Default town or region <input name="loc_region" value="{{ loc.loc_region }}" placeholder="e.g. Invercargill or Southland">
       <small>Used when a page gives a street without a town.</small></label>
-    <label>Countries <input name="loc_countries" value="{{ loc.loc_countries }}" placeholder="nz">
-      <small>Two-letter codes, comma separated. Blank = anywhere.</small></label>
+    <div class="nz-only"><strong>New Zealand only</strong>
+      <small>Lookups only search New Zealand, and any result outside it (including coordinates in a page) is ignored. Covers Stewart Island, the Chatham Islands and outlying islands.</small></div>
     <label class="span2">Location markers <input name="loc_markers" class="mono" value="{{ loc.loc_markers }}">
       <small>If your pages put the address after a word like <span class="mono">LOC:</span> or <span class="mono">@</span>, list them here (comma separated). Without one, addresses are found by their street type (St, Rd, Ave, Cres, SH1&hellip;).</small></label>
     <details class="span2">
@@ -220,7 +220,8 @@
       {% if loc_test.error %}<p class="flash flash-error">{{ loc_test.error }}</p>
       {% elif loc_test.result %}<p><strong>{{ 'Exact address' if loc_test.result.precision == 'point' else ('Street area' if loc_test.result.precision == 'area' else 'Town / area') }}</strong>{% if loc_test.result.radius_m %} within ≈{{ loc_test.result.radius_m }} m{% endif %}: {{ loc_test.result.label }}<br>
         <span class="mono small">{{ '%.5f'|format(loc_test.result.lat) }}, {{ '%.5f'|format(loc_test.result.lon) }}</span> <span class="muted small">{{ loc_test.result.display }}</span></p>
-      {% else %}<p>The geocoder didn't find it. Try setting a default town or region.</p>{% endif %}
+      {% elif loc_test.notes %}<p><strong>Not shown on the map:</strong> {{ loc_test.notes|join('; ') }}.</p>
+      {% else %}<p>The geocoder didn't find it in New Zealand. Try setting a default town or region.</p>{% endif %}
     {% endif %}
   </div>
   {% endif %}

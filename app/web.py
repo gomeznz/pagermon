@@ -603,7 +603,7 @@ def create_app() -> FastAPI:
             vals = {
                 "loc_enabled": "1" if loc_enabled else "0",
                 "loc_geocoder": loc_geocoder.strip() or locations.DEFAULTS["loc_geocoder"],
-                "loc_countries": re.sub(r"[^a-z,]", "", loc_countries.lower())[:40],
+                "loc_countries": "nz",   # lookups are always limited to New Zealand
                 "loc_region": " ".join(loc_region.split())[:60],
                 "loc_markers": loc_markers.strip()[:200],
                 "loc_email": loc_email.strip()[:120],
@@ -639,13 +639,15 @@ def create_app() -> FastAPI:
             conn.close()
         sample = sample.strip()[:500]
         ext = locations.extract(sample, cfg["loc_markers"])
-        result, error = None, ""
+        result, error, notes = None, "", []
         if ext:
+            geo = locations.Geocoder(db.connect, cfg)
             try:
-                result = await asyncio.to_thread(locations.resolve, sample, cfg,
-                                                 locations.Geocoder(db.connect, cfg))
+                result = await asyncio.to_thread(locations.resolve, sample, cfg, geo, notes)
             except Exception as exc:
                 error = f"Lookup failed: {exc}"[:200]
+            if not result and geo.rejected:
+                notes.append(f"the geocoder suggested \u201c{geo.rejected}\u201d, which is outside New Zealand, so it was ignored")
         found = ""
         if ext and ext.kind == "coords":
             found = f"coordinates {ext.lat}, {ext.lon}"
@@ -656,7 +658,7 @@ def create_app() -> FastAPI:
         elif ext:
             found = f"place \u201c{ext.text}\u201d"
         return await config(request, loc_test={"sample": sample, "found": found, "result": result,
-                                               "error": error})
+                                               "error": error, "notes": notes})
 
     @app.post("/config/settings")
     async def save_settings(request: Request, csrf: str = Form(""), retention_days: str = Form("30"),

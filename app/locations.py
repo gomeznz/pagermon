@@ -226,6 +226,7 @@ class Geocoder:
         self.conn_factory = conn_factory
         self.cfg = cfg
         self.fetch = fetch or self._http
+        self.rejected = ""     # last result thrown away for being outside New Zealand
 
     def _http(self, url: str) -> list:
         req = urllib.request.Request(url, headers={
@@ -243,12 +244,12 @@ class Geocoder:
             if row:
                 age = time.time() - row["ts"]
                 if row["result"] and age < 90 * 86400:
-                    return json.loads(row["result"])
+                    cached = json.loads(row["result"])
+                    return cached if _nz_result(cached) else None
                 if not row["result"] and age < 86400:
                     return None
             query = dict(params, format="jsonv2", limit="1", addressdetails="1")
-            if self.cfg.get("loc_countries"):
-                query["countrycodes"] = self.cfg["loc_countries"]
+            query["countrycodes"] = COUNTRY          # New Zealand only, whatever the settings say
             if self.cfg.get("loc_email"):
                 query["email"] = self.cfg["loc_email"]
             url = self.cfg.get("loc_geocoder") or DEFAULTS["loc_geocoder"]
@@ -262,6 +263,11 @@ class Geocoder:
                 finally:
                     Geocoder._last = time.time()
             result = data[0] if isinstance(data, list) and data else None
+            if result and not _nz_result(result):
+                log.info("ignoring a geocoder result outside New Zealand for %s: %s",
+                         params, result.get("display_name", ""))
+                self.rejected = result.get("display_name", "") or f"{result.get('lat')}, {result.get('lon')}"
+                result = None
             conn.execute("INSERT OR REPLACE INTO geocode_cache (key, result, ts) VALUES (?, ?, ?)",
                          (key, json.dumps(result) if result else "", time.time()))
             return result
@@ -269,12 +275,65 @@ class Geocoder:
             conn.close()
 
 
-def resolve(message: str, cfg: dict, geocoder: Geocoder) -> dict | None:
+# --- New Zealand only ---------------------------------------------------------
+#
+# Lookups always ask for New Zealand results (countrycodes=nz), and every result,
+# including coordinates written in a page and anything from the cache or a
+# self-hosted geocoder, must land inside one of these boxes (lat_min, lat_max,
+# lon_min, lon_max). They cover the mainland, Stewart Island and the subantarctic
+# islands, the Chatham Islands and the Kermadec Islands, and exclude Norfolk and
+# Lord Howe islands and Australia.
+NZ_BOXES = (
+    (-53.0, -33.8, 165.8, 179.6),      # North, South, Stewart and subantarctic islands
+    (-45.0, -43.3, -177.2, -175.5),    # Chatham Islands
+    (-31.6, -29.0, -179.1, -177.6),    # Kermadec Islands
+)
+COUNTRY = "nz"
+
+
+def in_nz(lat, lon) -> bool:
+    try:
+        lat, lon = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return False
+    return any(a <= lat <= b and c <= lon <= d for a, b, c, d in NZ_BOXES)
+
+
+def _nz_result(r: dict | None) -> bool:
+    if not r:
+        return False
+    cc = ((r.get("address") or {}).get("country_code") or "").lower()
+    return in_nz(r.get("lat"), r.get("lon")) and cc in ("", COUNTRY)
+
+
+def purge_outside_nz(conn) -> int:
+    """Remove stored locations and cached lookups that fall outside New Zealand."""
+    removed = 0
+    for row in conn.execute("SELECT id, lat, lon FROM message_locations").fetchall():
+        if not in_nz(row["lat"], row["lon"]):
+            conn.execute("DELETE FROM message_locations WHERE id = ?", (row["id"],))
+            removed += 1
+    for row in conn.execute("SELECT key, result FROM geocode_cache WHERE result != ''").fetchall():
+        try:
+            ok = _nz_result(json.loads(row["result"]))
+        except ValueError:
+            ok = False
+        if not ok:
+            conn.execute("DELETE FROM geocode_cache WHERE key = ?", (row["key"],))
+    return removed
+
+
+def resolve(message: str, cfg: dict, geocoder: Geocoder, notes: list | None = None) -> dict | None:
     """Location for a page as {lat, lon, radius_m, precision, label, display}, or None."""
     ext = extract(message, cfg.get("loc_markers", DEFAULTS["loc_markers"]))
     if not ext:
         return None
     if ext.kind == "coords":
+        if not in_nz(ext.lat, ext.lon):
+            if notes is not None:
+                notes.append(f"coordinates {ext.lat}, {ext.lon} are outside New Zealand, so they were ignored")
+            log.info("ignoring coordinates outside New Zealand: %s", ext.raw)
+            return None
         return {"lat": ext.lat, "lon": ext.lon, "radius_m": 0, "precision": "point",
                 "label": f"{ext.lat:.5f}, {ext.lon:.5f}", "display": "", "query": ext.raw}
     region = (cfg.get("loc_region") or "").strip()

@@ -118,3 +118,85 @@ def test_worker_stores_location(geo):
         Geocoder.__init__ = orig
     assert row and row["precision"] == "point"
     conn.close()
+
+
+# --- New Zealand only ---------------------------------------------------------
+
+@pytest.mark.parametrize("name, lat, lon, inside", [
+    ("Auckland", -36.85, 174.76, True),
+    ("Invercargill", -46.41, 168.35, True),
+    ("Cape Reinga", -34.43, 172.68, True),
+    ("Oban, Stewart Island", -46.90, 168.13, True),
+    ("Waitangi, Chatham Islands", -43.95, -176.56, True),
+    ("Raoul Island, Kermadecs", -29.27, -177.92, True),
+    ("Campbell Island", -52.54, 169.15, True),
+    ("Sydney", -33.87, 151.21, False),
+    ("Hobart", -42.88, 147.33, False),
+    ("Norfolk Island", -29.04, 167.95, False),
+    ("Lord Howe Island", -31.55, 159.08, False),
+    ("Noumea", -22.27, 166.45, False),
+    ("Suva, Fiji", -18.14, 178.44, False),
+    ("Inverness, Scotland", 57.48, -4.22, False),
+])
+def test_in_nz(name, lat, lon, inside):
+    assert locations.in_nz(lat, lon) is inside, name
+
+
+def _overseas_fetch(calls):
+    def fetch(url):
+        calls.append(url)
+        return [{"lat": "-33.8688", "lon": "151.2093", "display_name": "George Street, Sydney, Australia",
+                 "address": {"road": "George Street", "country_code": "au"}, "boundingbox": ["-33.9", "-33.8", "151.2", "151.3"]}]
+    return fetch
+
+
+def test_overseas_geocoder_result_is_ignored(monkeypatch):
+    conn = db.connect()
+    conn.execute("DELETE FROM geocode_cache")
+    conn.close()
+    calls = []
+    cfg = dict(locations.DEFAULTS, loc_countries="")       # even with the old setting cleared
+    geo = Geocoder(db.connect, cfg, fetch=_overseas_fetch(calls))
+    notes = []
+    assert resolve("CAR FIRE 5 GEORGE ST", cfg, geo, notes) is None
+    assert "countrycodes=nz" in calls[0]
+    assert "Sydney" in geo.rejected
+
+
+def test_overseas_coordinates_ignored_with_reason():
+    notes = []
+    assert resolve("MEET AT -33.8688, 151.2093 NOW", dict(locations.DEFAULTS), None, notes) is None
+    assert notes and "outside New Zealand" in notes[0]
+    ok = resolve("MEET AT -46.4119, 168.3520 NOW", dict(locations.DEFAULTS), None)
+    assert ok and ok["precision"] == "point"
+
+
+def test_cached_overseas_result_not_used():
+    conn = db.connect()
+    key = json.dumps({"q": "Somewhere"}, sort_keys=True)
+    conn.execute("INSERT OR REPLACE INTO geocode_cache (key, result, ts) VALUES (?, ?, ?)",
+                 (key, json.dumps({"lat": "51.5", "lon": "-0.12", "display_name": "London"}), time.time()))
+    conn.close()
+    geo = Geocoder(db.connect, dict(locations.DEFAULTS), fetch=lambda url: [])
+    assert geo.lookup({"q": "Somewhere"}) is None
+
+
+def test_purge_outside_nz():
+    conn = db.connect()
+    now = time.time()
+    ids = []
+    for msg in ("in nz", "in sydney"):
+        ids.append(conn.execute("INSERT INTO messages (ts, channel_name, protocol, capcode, msg_type, message) "
+                                "VALUES (?, 'T', 'POCSAG1200', '42', 'alpha', ?)", (now, msg)).lastrowid)
+    conn.execute("INSERT INTO message_locations (message_id, lat, lon, precision, created) VALUES (?, -46.41, 168.35, 'point', ?)", (ids[0], now))
+    conn.execute("INSERT INTO message_locations (message_id, lat, lon, precision, created) VALUES (?, -33.87, 151.21, 'point', ?)", (ids[1], now))
+    conn.execute("INSERT OR REPLACE INTO geocode_cache (key, result, ts) VALUES ('k-au', ?, ?)",
+                 (json.dumps({"lat": "-33.87", "lon": "151.21"}), now))
+    conn.execute("INSERT OR REPLACE INTO geocode_cache (key, result, ts) VALUES ('k-nz', ?, ?)",
+                 (json.dumps({"lat": "-46.41", "lon": "168.35"}), now))
+    assert locations.purge_outside_nz(conn) >= 1
+    kept = {r["message_id"] for r in conn.execute("SELECT message_id FROM message_locations")}
+    assert ids[0] in kept and ids[1] not in kept
+    keys = {r["key"] for r in conn.execute("SELECT key FROM geocode_cache")}
+    assert "k-nz" in keys and "k-au" not in keys
+    conn.close()

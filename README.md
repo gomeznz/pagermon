@@ -121,6 +121,8 @@ Turn on **Config → Locations & map**, set a **default town or region** (used w
 - **Area** (shaded circle sized to the street): a street with no number, or a number the map doesn't know (`SCRUB FIRE NORTH RD LORNEVILLE`, `SH1 EDENDALE`).
 - **Town / place** (larger circle): just a suburb, town or place (`LOC: BLUFF WHARF`).
 
+**New Zealand only:** lookups always search New Zealand, and any result outside it is ignored. That includes coordinates written in a page, cached results and answers from a self-hosted geocoder. The area allowed covers the mainland, Stewart Island, the subantarctic islands, the Chatham Islands and the Kermadecs. On upgrade, any locations already stored outside New Zealand are removed, and **Try it** says when a result was thrown away for being overseas.
+
 Addresses are found by street type (St, Rd, Ave, Cres, Tce, Hwy, SH1…), or after a marker word such as `LOC:` or `@` if your pages use one (configurable). Lookups use OpenStreetMap's Nominatim service by default, which in New Zealand includes LINZ addresses with rural RAPID numbers. They're cached and limited to one a second, as Nominatim's usage policy requires, and happen in the background so decoding never waits. **Turning lookups on sends the address part of matching pages to that service**; point the geocoder setting at your own Nominatim server if you'd rather nothing leaves your network. Map tiles come from OpenStreetMap by default (also configurable). The map library (Leaflet) is bundled with the app.
 
 ## Pushover
